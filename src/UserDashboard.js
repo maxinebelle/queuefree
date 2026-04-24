@@ -2,11 +2,9 @@ import React, { useEffect, useMemo, useRef, useState } from "react";
 import { db } from "./firebase";
 import { useAuth } from "./AuthContext";
 import {
-  addDoc,
   collection,
   deleteDoc,
   doc,
-  getDoc,
   getDocs,
   onSnapshot,
   query,
@@ -18,6 +16,7 @@ import {
 import "./UserDashboard.css";
 
 const DEPARTMENT_NAMES = ["Registrar", "Cashier", "Accounting", "EDP"];
+const MAX_QUEUE_NUMBER = 999;
 
 function UserDashboard() {
   const { currentUser } = useAuth();
@@ -26,13 +25,13 @@ function UserDashboard() {
   const [departmentData, setDepartmentData] = useState({});
   const [myTickets, setMyTickets] = useState([]);
   const [allTickets, setAllTickets] = useState([]);
-  const [lastAlerts, setLastAlerts] = useState({});
   const [activeSection, setActiveSection] = useState("home");
   const [sidebarOpen, setSidebarOpen] = useState(false);
 
   const [queueAlertsEnabled, setQueueAlertsEnabled] = useState(true);
-  const [requestUpdatesEnabled, setRequestUpdatesEnabled] = useState(true);
-  const [soundEnabled, setSoundEnabled] = useState(false);
+  const [aiNotificationsEnabled, setAiNotificationsEnabled] = useState(true);
+  const [systemAnnouncementsEnabled, setSystemAnnouncementsEnabled] = useState(true);
+  const [soundEnabled, setSoundEnabled] = useState(true);
 
   const [userProfile, setUserProfile] = useState(null);
 
@@ -42,13 +41,51 @@ function UserDashboard() {
   const [profileSaving, setProfileSaving] = useState(false);
   const [selectedImageName, setSelectedImageName] = useState("");
 
-  const [alertFilter, setAlertFilter] = useState("all");
+  const [notificationFilter, setNotificationFilter] = useState("all");
   const [historyFilter, setHistoryFilter] = useState("all");
   const [cancelLoadingId, setCancelLoadingId] = useState("");
   const [queueLoading, setQueueLoading] = useState(false);
   const [departmentsLoading, setDepartmentsLoading] = useState(true);
+  const [readNotificationIds, setReadNotificationIds] = useState([]);
+  const [popupNotification, setPopupNotification] = useState(null);
+  const [dismissedPopupIds, setDismissedPopupIds] = useState([]);
 
   const fileInputRef = useRef(null);
+  const lastSoundPopupIdRef = useRef("");
+
+  const notificationStorageKey = useMemo(() => {
+    return currentUser?.uid ? `queuefree_notifications_read_${currentUser.uid}` : "";
+  }, [currentUser]);
+
+  useEffect(() => {
+    if (!notificationStorageKey) {
+      setReadNotificationIds([]);
+      return;
+    }
+
+    try {
+      const saved = localStorage.getItem(notificationStorageKey);
+      if (saved) {
+        const parsed = JSON.parse(saved);
+        setReadNotificationIds(Array.isArray(parsed) ? parsed : []);
+      } else {
+        setReadNotificationIds([]);
+      }
+    } catch (error) {
+      console.error("Failed to load notification read state:", error);
+      setReadNotificationIds([]);
+    }
+  }, [notificationStorageKey]);
+
+  useEffect(() => {
+    if (!notificationStorageKey) return;
+
+    try {
+      localStorage.setItem(notificationStorageKey, JSON.stringify(readNotificationIds));
+    } catch (error) {
+      console.error("Failed to save notification read state:", error);
+    }
+  }, [notificationStorageKey, readNotificationIds]);
 
   useEffect(() => {
     setDepartmentsLoading(true);
@@ -108,10 +145,12 @@ function UserDashboard() {
       (snap) => {
         if (snap.exists()) {
           const data = snap.data();
+
           setUserProfile({
             uid: currentUser.uid,
             ...data
           });
+
           setEditFirstName(data.first_name || "");
           setEditLastName(data.last_name || "");
           setEditProfileImage(data.profile_image || "");
@@ -168,7 +207,12 @@ function UserDashboard() {
   }, [departmentData, currentUser]);
 
   const activeTickets = useMemo(() => {
-    return myTickets.filter((ticket) => ticket.status !== "Done");
+    return myTickets.filter(
+      (ticket) =>
+        ticket.status !== "Done" &&
+        ticket.status !== "Cancelled" &&
+        ticket.status !== "Reset"
+    );
   }, [myTickets]);
 
   const getEffectiveLaneDetails = () => {
@@ -211,6 +255,10 @@ function UserDashboard() {
     return getEffectiveLaneDetails();
   }, [userProfile]);
 
+  const currentLaneType = useMemo(() => {
+    return effectiveLaneDetails.laneType;
+  }, [effectiveLaneDetails]);
+
   const getDepartmentLaneQueue = (ticket) => {
     const laneType = ticket.lane_type || "Regular";
 
@@ -218,6 +266,8 @@ function UserDashboard() {
       (item) =>
         item.dept_id === ticket.dept_id &&
         item.status !== "Done" &&
+        item.status !== "Cancelled" &&
+        item.status !== "Reset" &&
         (item.lane_type || "Regular") === laneType
     );
 
@@ -236,7 +286,8 @@ function UserDashboard() {
   };
 
   const getPeopleAhead = (ticket) => {
-    if (ticket.status === "Done") return "Already served";
+    if (ticket.status === "Done") return 0;
+    if (ticket.status === "Cancelled" || ticket.status === "Reset") return 0;
     if (ticket.status === "Serving") return 0;
 
     const orderedQueue = getDepartmentLaneQueue(ticket);
@@ -248,6 +299,7 @@ function UserDashboard() {
 
   const getPeopleAfter = (ticket) => {
     if (ticket.status === "Done") return 0;
+    if (ticket.status === "Cancelled" || ticket.status === "Reset") return 0;
 
     const orderedQueue = getDepartmentLaneQueue(ticket);
     const index = orderedQueue.findIndex((item) => item.id === ticket.id);
@@ -256,23 +308,65 @@ function UserDashboard() {
     return orderedQueue.length - index - 1;
   };
 
-  const getEstimatedWait = (ticket) => {
-    if (ticket.status === "Done" || ticket.status === "Serving") return "0 min";
-
+  const getEstimatedWaitMinutesValue = (ticket) => {
     const dept = departmentData[ticket.deptName];
-    if (!dept) return "-";
+    const avgServiceTime = Number(
+      dept?.avg_service_time || ticket.avg_service_time_snapshot || 0
+    );
+
+    if (
+      ticket.initial_estimated_wait_min !== undefined &&
+      ticket.initial_estimated_wait_min !== null
+    ) {
+      return Number(ticket.initial_estimated_wait_min || 0);
+    }
+
+    if (
+      ticket.status === "Done" ||
+      ticket.status === "Cancelled" ||
+      ticket.status === "Reset"
+    ) {
+      const initialAhead = Number(
+        ticket.initial_people_ahead ?? Math.max((ticket.lane_number || 1) - 1, 0)
+      );
+
+      return initialAhead * avgServiceTime;
+    }
+
+    if (ticket.status === "Serving") return 0;
 
     const ahead = getPeopleAhead(ticket);
-    if (typeof ahead !== "number") return "-";
+    if (typeof ahead !== "number") return 0;
 
-    const avgServiceTime = dept.avg_service_time || 0;
-    return `${ahead * avgServiceTime} min`;
+    return ahead * avgServiceTime;
+  };
+
+  const getEstimatedWait = (ticket) => {
+    const minutes = getEstimatedWaitMinutesValue(ticket);
+    return `${minutes} min`;
+  };
+
+  const getNumbersBeforeTurn = (ticket) => {
+    if (
+      ticket.status === "Done" ||
+      ticket.status === "Cancelled" ||
+      ticket.status === "Reset"
+    ) {
+      return Number(
+        ticket.initial_people_ahead ?? Math.max((ticket.lane_number || 1) - 1, 0)
+      );
+    }
+
+    const ahead = getPeopleAhead(ticket);
+    return ahead;
   };
 
   const getDisplayStatus = (ticket) => {
     if (ticket.status === "Done") return "Done";
     if (ticket.status === "Serving") return "Serving";
     if (ticket.status === "Paused") return "Paused";
+    if (ticket.status === "Cancelled") return "Cancelled";
+    if (ticket.status === "Reset") return "Reset";
     return ticket.status || "Pending";
   };
 
@@ -282,7 +376,22 @@ function UserDashboard() {
     if (status === "Serving") return "qf-status qf-status-serving";
     if (status === "Done") return "qf-status qf-status-done";
     if (status === "Paused") return "qf-status qf-status-paused";
+    if (status === "Cancelled" || status === "Reset") {
+      return "qf-status qf-status-done";
+    }
+
     return "qf-status qf-status-pending";
+  };
+
+  const normalizeNowServingDisplay = (value) => {
+    if (!value) return "-";
+
+    const text = String(value).trim();
+
+    if (text === "0") return "-";
+    if (/^[A-Z]P?000$/i.test(text)) return "-";
+
+    return text;
   };
 
   const getNowServingDisplay = (deptName, laneType) => {
@@ -290,19 +399,15 @@ function UserDashboard() {
     if (!dept) return "-";
 
     if (laneType === "Priority") {
-      return dept.priority_now_serving_display || "-";
+      return normalizeNowServingDisplay(dept.priority_now_serving_display);
     }
 
-    return dept.regular_now_serving_display || "-";
+    return normalizeNowServingDisplay(dept.regular_now_serving_display);
   };
 
   const getPriorityLabel = () => {
     return effectiveLaneDetails.laneLabel;
   };
-
-  const currentLaneType = useMemo(() => {
-    return effectiveLaneDetails.laneType;
-  }, [effectiveLaneDetails]);
 
   const getSelectedLaneNowServing = (deptName) => {
     return getNowServingDisplay(deptName, currentLaneType);
@@ -326,11 +431,13 @@ function UserDashboard() {
 
     const pendingCount = getLanePendingCountByDept(deptName);
     const avgTime = dept.avg_service_time || 0;
+
     return `${pendingCount * avgTime} min`;
   };
 
   const getDepartmentRecordForQueue = async () => {
     const stateDept = departmentData[selectedDeptName];
+
     if (stateDept?.id) {
       return stateDept;
     }
@@ -347,6 +454,7 @@ function UserDashboard() {
     }
 
     const docSnap = deptSnapshot.docs[0];
+
     return {
       id: docSnap.id,
       ...docSnap.data()
@@ -411,8 +519,7 @@ function UserDashboard() {
 
         const requestedPriority = userData.is_priority === true;
         const priorityStatus = String(userData.priority_status || "").toLowerCase();
-        const effectivePriority =
-          requestedPriority && priorityStatus === "approved";
+        const effectivePriority = requestedPriority && priorityStatus === "approved";
 
         const priorityType = effectivePriority
           ? userData.priority_type || "Priority"
@@ -425,7 +532,9 @@ function UserDashboard() {
           : "regular_last_number";
 
         const currentLaneLast = Number(deptData[laneLastField] || 0);
-        const nextLaneNumber = currentLaneLast + 1;
+
+        const nextLaneNumber =
+          currentLaneLast >= MAX_QUEUE_NUMBER ? 1 : currentLaneLast + 1;
 
         const prefix =
           deptData.queue_prefix || selectedDeptName.charAt(0).toUpperCase();
@@ -433,6 +542,10 @@ function UserDashboard() {
         const formattedNumber = effectivePriority
           ? `${prefix}P${String(nextLaneNumber).padStart(3, "0")}`
           : `${prefix}${String(nextLaneNumber).padStart(3, "0")}`;
+
+        const avgServiceTime = Number(deptData.avg_service_time || 0);
+        const initialPeopleAhead = Math.max(nextLaneNumber - 1, 0);
+        const initialEstimatedWaitMin = initialPeopleAhead * avgServiceTime;
 
         transaction.update(deptRef, {
           [laneLastField]: nextLaneNumber
@@ -449,6 +562,9 @@ function UserDashboard() {
           status: "Pending",
           is_priority: effectivePriority,
           priority_type: priorityType,
+          initial_people_ahead: initialPeopleAhead,
+          initial_estimated_wait_min: initialEstimatedWaitMin,
+          avg_service_time_snapshot: avgServiceTime,
           created_at: serverTimestamp()
         });
 
@@ -518,88 +634,81 @@ function UserDashboard() {
     }
   };
 
-  useEffect(() => {
-    if (!queueAlertsEnabled) return;
-
-    activeTickets.forEach((ticket) => {
-      const position = getPeopleAhead(ticket);
-      const currentAlert = lastAlerts[ticket.id] || "";
-
-      if (position === 3 && currentAlert !== "3") {
-        alert(`🔔 ${ticket.deptName} (${ticket.lane_type}): Only 3 people ahead.`);
-        setLastAlerts((prev) => ({ ...prev, [ticket.id]: "3" }));
-      } else if (position === 1 && currentAlert !== "1") {
-        alert(`⚡ ${ticket.deptName} (${ticket.lane_type}): You're next!`);
-        setLastAlerts((prev) => ({ ...prev, [ticket.id]: "1" }));
-      } else if (ticket.status === "Serving" && currentAlert !== "serving") {
-        alert(`🎯 ${ticket.deptName} (${ticket.lane_type}): It is now your turn.`);
-        setLastAlerts((prev) => ({ ...prev, [ticket.id]: "serving" }));
-      }
-    });
-  }, [activeTickets, lastAlerts, queueAlertsEnabled]);
-
-  const generatedAlerts = useMemo(() => {
-    const alerts = [];
-
-    if (
-      userProfile?.is_priority === true &&
-      (userProfile?.priority_status || "").toLowerCase() === "pending"
-    ) {
-      alerts.push({
-        id: "priority-pending-status",
-        category: "system",
-        type: "system",
-        title: "Priority Request Pending",
-        message:
-          "Your priority request is still under review. Until approved, your queue lane remains Regular.",
-        time: "Live",
-        ticketNumber: "-",
-        nowServing: "-",
-        beforeYou: "-",
-        afterYou: "-",
-        estimatedWait: "-"
-      });
+  const formatTimestampLabel = (value) => {
+    if (value?.toDate) {
+      return value.toDate().toLocaleString();
     }
 
-    if (
-      userProfile?.is_priority === true &&
-      (userProfile?.priority_status || "").toLowerCase() === "approved"
-    ) {
-      alerts.push({
-        id: "priority-approved-status",
-        category: "system",
-        type: "system",
-        title: "Priority Request Approved",
-        message:
-          "Your priority request has already been approved. You may use the Priority lane.",
-        time: "Live",
-        ticketNumber: "-",
-        nowServing: "-",
-        beforeYou: "-",
-        afterYou: "-",
-        estimatedWait: "-"
-      });
+    if (value?.seconds) {
+      return new Date(value.seconds * 1000).toLocaleString();
     }
 
-    if (
-      userProfile?.is_priority === true &&
-      (userProfile?.priority_status || "").toLowerCase() === "rejected"
-    ) {
-      alerts.push({
-        id: "priority-rejected-status",
-        category: "system",
-        type: "system",
-        title: "Priority Request Rejected",
-        message:
-          "Your priority request was rejected. Your lane remains Regular.",
-        time: "Live",
-        ticketNumber: "-",
-        nowServing: "-",
-        beforeYou: "-",
-        afterYou: "-",
-        estimatedWait: "-"
-      });
+    return "Live";
+  };
+
+  const isRecentTicket = (ticket) => {
+    if (!ticket?.created_at?.seconds) return false;
+
+    const nowSeconds = Math.floor(Date.now() / 1000);
+
+    return nowSeconds - ticket.created_at.seconds <= 900;
+  };
+
+  const playNotificationSound = () => {
+    if (!soundEnabled) return;
+
+    try {
+      const AudioContext = window.AudioContext || window.webkitAudioContext;
+      if (!AudioContext) return;
+
+      const audioContext = new AudioContext();
+      const oscillator = audioContext.createOscillator();
+      const gainNode = audioContext.createGain();
+
+      oscillator.type = "sine";
+      oscillator.frequency.setValueAtTime(880, audioContext.currentTime);
+      oscillator.frequency.setValueAtTime(660, audioContext.currentTime + 0.12);
+
+      gainNode.gain.setValueAtTime(0.0001, audioContext.currentTime);
+      gainNode.gain.exponentialRampToValueAtTime(0.18, audioContext.currentTime + 0.03);
+      gainNode.gain.exponentialRampToValueAtTime(0.0001, audioContext.currentTime + 0.35);
+
+      oscillator.connect(gainNode);
+      gainNode.connect(audioContext.destination);
+
+      oscillator.start(audioContext.currentTime);
+      oscillator.stop(audioContext.currentTime + 0.38);
+    } catch (error) {
+      console.warn("Notification sound blocked by browser until user interacts:", error);
     }
+  };
+
+  const buildAiQueueMessage = (ticket, ahead, wait) => {
+    if (ticket.status === "Serving") {
+      return `AI prediction: your queue number ${ticket.ticket_number} is now active in ${ticket.deptName}. Please proceed to the office now.`;
+    }
+
+    if (typeof ahead !== "number") {
+      return `AI prediction is still checking the live queue flow for ${ticket.deptName}.`;
+    }
+
+    if (ahead === 0) {
+      return `AI prediction: your turn is about to be called in ${ticket.deptName}. Please stay near the office now.`;
+    }
+
+    if (ahead === 1) {
+      return `AI prediction: only 1 queue number is before your turn in ${ticket.deptName}. Please standby near the office.`;
+    }
+
+    if (ahead <= 4) {
+      return `AI prediction: your turn is approaching. ${ahead} queue numbers are still before your turn in ${ticket.deptName}. Estimated wait is ${wait}.`;
+    }
+
+    return `AI prediction: queue movement in ${ticket.deptName} is stable. ${ahead} queue numbers are still before your turn. Estimated wait is ${wait}.`;
+  };
+
+  const generatedNotifications = useMemo(() => {
+    const notifications = [];
 
     activeTickets.forEach((ticket) => {
       const ahead = getPeopleAhead(ticket);
@@ -611,71 +720,279 @@ function UserDashboard() {
         ticket.lane_type || "Regular"
       );
 
-      alerts.push({
-        id: `${ticket.id}-status`,
-        category:
-          status === "Serving" || (typeof ahead === "number" && ahead <= 3)
-            ? "queue"
-            : "system",
-        type:
-          status === "Serving"
-            ? "turn"
-            : typeof ahead === "number" && ahead === 1
-            ? "next"
-            : typeof ahead === "number" && ahead <= 3
-            ? "warning"
-            : "info",
-        title: `${ticket.deptName} • ${ticket.lane_type || "Regular"} Lane`,
-        message:
-          status === "Serving"
-            ? `It is now your turn. Please proceed to the office.`
-            : typeof ahead === "number" && ahead === 1
-            ? `You are next. Current now serving is ${nowServing}.`
-            : typeof ahead === "number" && ahead <= 3
-            ? `Only ${ahead} ${ahead === 1 ? "person" : "people"} ahead of you.`
-            : `${ahead} people ahead. Estimated wait time is ${wait}.`,
-        time: "Live",
-        ticketNumber: ticket.ticket_number,
-        nowServing,
-        beforeYou: ahead,
-        afterYou: after,
-        estimatedWait: wait
-      });
+      if (queueAlertsEnabled && status === "Serving") {
+        notifications.push({
+          id: `${ticket.id}-turn`,
+          category: "queue",
+          type: "turn",
+          title: "It's Your Turn!",
+          message: `Your queue number ${ticket.ticket_number} in ${ticket.deptName} is now being called. Please proceed to the assigned office.`,
+          time: "Live",
+          hasMetrics: true,
+          ticketNumber: ticket.ticket_number,
+          nowServing,
+          numbersBeforeTurn: ahead,
+          afterYou: after,
+          estimatedWait: wait,
+          popupPriority: 1
+        });
+      } else if (queueAlertsEnabled && typeof ahead === "number" && ahead === 1) {
+        notifications.push({
+          id: `${ticket.id}-next`,
+          category: "queue",
+          type: "next",
+          title: "Queue Update",
+          message: `You're next. Current now serving is ${nowServing || "-"} and your number is ${ticket.ticket_number}.`,
+          time: "Live",
+          hasMetrics: true,
+          ticketNumber: ticket.ticket_number,
+          nowServing,
+          numbersBeforeTurn: ahead,
+          afterYou: after,
+          estimatedWait: wait,
+          popupPriority: 2
+        });
+      } else if (queueAlertsEnabled && typeof ahead === "number" && ahead <= 3) {
+        notifications.push({
+          id: `${ticket.id}-warning`,
+          category: "queue",
+          type: "warning",
+          title: "Queue Update",
+          message: `Only ${ahead} queue ${ahead === 1 ? "number is" : "numbers are"} before your turn in ${ticket.deptName}. Please get ready.`,
+          time: "Live",
+          hasMetrics: true,
+          ticketNumber: ticket.ticket_number,
+          nowServing,
+          numbersBeforeTurn: ahead,
+          afterYou: after,
+          estimatedWait: wait,
+          popupPriority: 3
+        });
+      }
+
+      if (aiNotificationsEnabled) {
+        notifications.push({
+          id: `${ticket.id}-ai-progress`,
+          category: "queue",
+          type: "ai",
+          title: "AI Queue Prediction",
+          message: buildAiQueueMessage(ticket, ahead, wait),
+          time: "Live",
+          hasMetrics: typeof ahead === "number",
+          ticketNumber: ticket.ticket_number,
+          nowServing,
+          numbersBeforeTurn: ahead,
+          afterYou: after,
+          estimatedWait: wait,
+          popupPriority:
+            status === "Serving" || (typeof ahead === "number" && ahead <= 4) ? 2 : 5
+        });
+      }
+
+      if (systemAnnouncementsEnabled && isRecentTicket(ticket)) {
+        notifications.push({
+          id: `${ticket.id}-created`,
+          category: "system",
+          type: "system",
+          title: "Queue Number Generated",
+          message: `Your queue number ${ticket.ticket_number} for ${ticket.deptName} has been created successfully.`,
+          time: formatTimestampLabel(ticket.created_at),
+          hasMetrics: false,
+          popupPriority: 6
+        });
+      }
     });
 
-    if (alerts.length === 0) {
-      alerts.push({
-        id: "empty-alert",
+    if (
+      systemAnnouncementsEnabled &&
+      userProfile?.is_priority === true &&
+      (userProfile?.priority_status || "").toLowerCase() === "pending"
+    ) {
+      notifications.push({
+        id: "priority-pending-status",
         category: "system",
-        type: "empty",
-        title: "No Alerts Yet",
+        type: "system",
+        title: "Priority Request Pending",
         message:
-          "Your queue notifications and updates will appear here once you have an active queue.",
-        time: "Now",
-        ticketNumber: "-",
-        nowServing: "-",
-        beforeYou: "-",
-        afterYou: "-",
-        estimatedWait: "-"
+          "Your priority request is still under review. Until approved, your queue lane remains under Regular.",
+        time: "Live",
+        hasMetrics: false,
+        popupPriority: 6
       });
     }
 
-    return alerts;
-  }, [activeTickets, userProfile, departmentData, allTickets]);
+    if (
+      systemAnnouncementsEnabled &&
+      userProfile?.is_priority === true &&
+      (userProfile?.priority_status || "").toLowerCase() === "approved"
+    ) {
+      notifications.push({
+        id: "priority-approved-status",
+        category: "system",
+        type: "system",
+        title: "Priority Request Approved",
+        message:
+          "Your priority request has been approved. You may now use the Priority lane when joining a queue.",
+        time: "Live",
+        hasMetrics: false,
+        popupPriority: 6
+      });
+    }
 
-  const filteredAlerts = useMemo(() => {
-    if (alertFilter === "all") return generatedAlerts;
-    return generatedAlerts.filter((alertItem) => alertItem.category === alertFilter);
-  }, [generatedAlerts, alertFilter]);
+    if (
+      systemAnnouncementsEnabled &&
+      userProfile?.is_priority === true &&
+      (userProfile?.priority_status || "").toLowerCase() === "rejected"
+    ) {
+      notifications.push({
+        id: "priority-rejected-status",
+        category: "system",
+        type: "system",
+        title: "Priority Request Rejected",
+        message:
+          "Your priority request was rejected, so your queue access remains under the Regular lane.",
+        time: "Live",
+        hasMetrics: false,
+        popupPriority: 6
+      });
+    }
+
+    if (aiNotificationsEnabled) {
+      const officeWait = getOfficeEstimatedWait(selectedDeptName);
+      const officeQueue = getLanePendingCountByDept(selectedDeptName);
+
+      notifications.push({
+        id: `ai-best-time-${selectedDeptName}-${currentLaneType}`,
+        category: "system",
+        type: "ai",
+        title: "AI Queue Insight",
+        message:
+          officeQueue === 0
+            ? `AI prediction: ${selectedDeptName} currently has no waiting users in the ${currentLaneType} lane. This is a good time to go now.`
+            : `AI prediction: ${selectedDeptName} currently has ${officeQueue} waiting ${officeQueue === 1 ? "person" : "people"} in the ${currentLaneType} lane. Estimated wait is ${officeWait}.`,
+        time: "Live",
+        hasMetrics: false,
+        popupPriority: 7
+      });
+    }
+
+    notifications.sort((a, b) => {
+      const aPriority = a.popupPriority || 99;
+      const bPriority = b.popupPriority || 99;
+      return aPriority - bPriority;
+    });
+
+    return notifications;
+  }, [
+    activeTickets,
+    userProfile,
+    selectedDeptName,
+    currentLaneType,
+    queueAlertsEnabled,
+    aiNotificationsEnabled,
+    systemAnnouncementsEnabled,
+    departmentData,
+    allTickets
+  ]);
+
+  const filteredNotifications = useMemo(() => {
+    if (notificationFilter === "all") return generatedNotifications;
+
+    return generatedNotifications.filter(
+      (notificationItem) => notificationItem.category === notificationFilter
+    );
+  }, [generatedNotifications, notificationFilter]);
+
+  const unreadNotificationCount = useMemo(() => {
+    return generatedNotifications.filter(
+      (notificationItem) => !readNotificationIds.includes(notificationItem.id)
+    ).length;
+  }, [generatedNotifications, readNotificationIds]);
+
+  useEffect(() => {
+    if (activeSection === "notifications") {
+      setPopupNotification(null);
+      return;
+    }
+
+    const nextPopup = generatedNotifications.find(
+      (item) =>
+        !readNotificationIds.includes(item.id) &&
+        !dismissedPopupIds.includes(item.id) &&
+        (item.type === "turn" ||
+          item.type === "next" ||
+          item.type === "warning" ||
+          item.type === "ai")
+    );
+
+    if (nextPopup) {
+      setPopupNotification(nextPopup);
+    }
+  }, [generatedNotifications, readNotificationIds, dismissedPopupIds, activeSection]);
+
+  useEffect(() => {
+    if (!popupNotification) return;
+    if (activeSection === "notifications") return;
+
+    if (lastSoundPopupIdRef.current !== popupNotification.id) {
+      lastSoundPopupIdRef.current = popupNotification.id;
+      playNotificationSound();
+    }
+  }, [popupNotification, activeSection, soundEnabled]);
+
+  const markNotificationAsRead = (notificationId) => {
+    if (!notificationId) return;
+
+    setReadNotificationIds((prev) => {
+      if (prev.includes(notificationId)) return prev;
+      return [...prev, notificationId];
+    });
+
+    if (popupNotification?.id === notificationId) {
+      setPopupNotification(null);
+    }
+  };
+
+  const markAllNotificationsAsRead = () => {
+    setReadNotificationIds(generatedNotifications.map((item) => item.id));
+    setPopupNotification(null);
+  };
+
+  const dismissPopupNotification = () => {
+    if (!popupNotification?.id) {
+      setPopupNotification(null);
+      return;
+    }
+
+    setDismissedPopupIds((prev) => {
+      if (prev.includes(popupNotification.id)) return prev;
+      return [...prev, popupNotification.id];
+    });
+
+    setPopupNotification(null);
+  };
 
   const filteredHistory = useMemo(() => {
     if (historyFilter === "all") return myTickets;
+
     if (historyFilter === "active") {
-      return myTickets.filter((ticket) => ticket.status !== "Done");
+      return myTickets.filter(
+        (ticket) =>
+          ticket.status !== "Done" &&
+          ticket.status !== "Cancelled" &&
+          ticket.status !== "Reset"
+      );
     }
+
     if (historyFilter === "completed") {
-      return myTickets.filter((ticket) => ticket.status === "Done");
+      return myTickets.filter(
+        (ticket) =>
+          ticket.status === "Done" ||
+          ticket.status === "Cancelled" ||
+          ticket.status === "Reset"
+      );
     }
+
     return myTickets;
   }, [myTickets, historyFilter]);
 
@@ -708,10 +1025,12 @@ function UserDashboard() {
     setSelectedImageName(file.name);
 
     const reader = new FileReader();
+
     reader.onloadend = () => {
       const base64String = reader.result;
       setEditProfileImage(base64String);
     };
+
     reader.readAsDataURL(file);
   };
 
@@ -739,7 +1058,7 @@ function UserDashboard() {
   const menuItems = [
     { key: "home", label: "Home" },
     { key: "queue", label: "Queue" },
-    { key: "alerts", label: "Alerts" },
+    { key: "notifications", label: "Notifications", badge: unreadNotificationCount },
     { key: "history", label: "History" },
     { key: "settings", label: "Settings" },
     { key: "accounts", label: "Accounts" }
@@ -764,8 +1083,8 @@ function UserDashboard() {
           <div className="qf-mini-brand">QUEUEFREE • UCLM</div>
           <h1>Hello, {displayName}</h1>
           <p>
-            Monitor your queue in real time based on your assigned lane. This
-            dashboard shows exactly how many are before and after you.
+            Monitor your queue in real time based on your assigned lane. This dashboard
+            shows exactly how many queue numbers are before your turn.
           </p>
         </div>
 
@@ -774,13 +1093,15 @@ function UserDashboard() {
             <span>Lane Assignment</span>
             <strong>{getPriorityLabel()}</strong>
           </div>
+
           <div className="qf-side-stat">
             <span>Priority Status</span>
             <strong>{effectiveLaneDetails.priorityStatusLabel}</strong>
           </div>
+
           <div className="qf-side-stat">
-            <span>Active Queues</span>
-            <strong>{activeTickets.length}</strong>
+            <span>Notifications</span>
+            <strong>{unreadNotificationCount}</strong>
           </div>
         </div>
       </section>
@@ -790,9 +1111,7 @@ function UserDashboard() {
           <div className="qf-panel-head">
             <div>
               <h2>My Live Queue Status</h2>
-              <p>
-                Real-time status for your current active ticket based on your own lane.
-              </p>
+              <p>Real-time status for your current active ticket based on your own lane.</p>
             </div>
           </div>
 
@@ -825,7 +1144,7 @@ function UserDashboard() {
               </div>
 
               <div className="qf-live-metric-box">
-                <span>Before You</span>
+                <span>Numbers Before Turn</span>
                 <strong>{getPeopleAhead(primaryLiveTicket)}</strong>
               </div>
 
@@ -953,9 +1272,20 @@ function UserDashboard() {
             <div className="qf-ai-card">
               <div className="qf-ai-badge">AI</div>
               <p>
-                Based on current {currentLaneType.toLowerCase()} lane volume, the best
-                time to visit <strong>{selectedDeptName}</strong> is approximately{" "}
-                <strong>{getOfficeEstimatedWait(selectedDeptName)}</strong> from now.
+                {getLanePendingCountByDept(selectedDeptName) === 0 ? (
+                  <>
+                    AI predicts that <strong>{selectedDeptName}</strong> is currently clear for the{" "}
+                    <strong>{currentLaneType}</strong> lane. This is a good time to go now.
+                  </>
+                ) : (
+                  <>
+                    AI predicts that <strong>{selectedDeptName}</strong> currently has{" "}
+                    <strong>{getLanePendingCountByDept(selectedDeptName)}</strong> waiting{" "}
+                    {getLanePendingCountByDept(selectedDeptName) === 1 ? "person" : "people"} in the{" "}
+                    <strong>{currentLaneType}</strong> lane, with an estimated wait of{" "}
+                    <strong>{getOfficeEstimatedWait(selectedDeptName)}</strong>.
+                  </>
+                )}
               </p>
             </div>
           </div>
@@ -982,6 +1312,7 @@ function UserDashboard() {
                         <h3>{ticket.deptName}</h3>
                         <p>{ticket.ticket_number} • {ticket.lane_type || "Regular"} Lane</p>
                       </div>
+
                       <span className={getStatusClass(ticket)}>
                         {getDisplayStatus(ticket)}
                       </span>
@@ -1011,83 +1342,121 @@ function UserDashboard() {
     );
   };
 
-  const renderAlertsSection = () => (
-    <section className="qf-panel-v2">
-      <div className="qf-panel-head">
-        <div>
-          <h2>Notifications</h2>
-          <p>Live queue alerts and updates based on your current active tickets.</p>
+  const renderNotificationMetrics = (notificationItem) => {
+    if (!notificationItem.hasMetrics) return null;
+
+    return (
+      <div className="qf-notification-meta-grid">
+        <div className="qf-notification-meta-box">
+          <span>Ticket</span>
+          <strong>{notificationItem.ticketNumber}</strong>
+        </div>
+
+        <div className="qf-notification-meta-box">
+          <span>Now Serving</span>
+          <strong>{notificationItem.nowServing}</strong>
+        </div>
+
+        <div className="qf-notification-meta-box">
+          <span>Numbers Before Turn</span>
+          <strong>{notificationItem.numbersBeforeTurn}</strong>
+        </div>
+
+        <div className="qf-notification-meta-box">
+          <span>After You</span>
+          <strong>{notificationItem.afterYou}</strong>
+        </div>
+
+        <div className="qf-notification-meta-box">
+          <span>Est. Wait</span>
+          <strong>{notificationItem.estimatedWait}</strong>
         </div>
       </div>
+    );
+  };
 
-      <div className="qf-alert-filter-row">
+  const renderNotificationsSection = () => (
+    <section className="qf-panel-v2">
+      <div className="qf-notification-head-row">
+        <div className="qf-panel-head qf-panel-head-no-margin">
+          <div>
+            <h2>Notifications</h2>
+            <p>AI-generated queue updates and live status notifications.</p>
+          </div>
+        </div>
+
         <button
           type="button"
-          className={`qf-alert-filter-pill ${alertFilter === "all" ? "active" : ""}`}
-          onClick={() => setAlertFilter("all")}
+          className="qf-mark-read-btn"
+          onClick={markAllNotificationsAsRead}
+        >
+          Mark all read
+        </button>
+      </div>
+
+      <div className="qf-notification-filter-row">
+        <button
+          type="button"
+          className={`qf-notification-filter-pill ${notificationFilter === "all" ? "active" : ""}`}
+          onClick={() => setNotificationFilter("all")}
         >
           All
         </button>
 
         <button
           type="button"
-          className={`qf-alert-filter-pill ${alertFilter === "queue" ? "active" : ""}`}
-          onClick={() => setAlertFilter("queue")}
+          className={`qf-notification-filter-pill ${notificationFilter === "queue" ? "active" : ""}`}
+          onClick={() => setNotificationFilter("queue")}
         >
           Queue
         </button>
 
         <button
           type="button"
-          className={`qf-alert-filter-pill ${alertFilter === "system" ? "active" : ""}`}
-          onClick={() => setAlertFilter("system")}
+          className={`qf-notification-filter-pill ${notificationFilter === "system" ? "active" : ""}`}
+          onClick={() => setNotificationFilter("system")}
         >
           System
         </button>
       </div>
 
-      <div className="qf-alert-list-v2">
-        {filteredAlerts.map((alertItem) => (
-          <div
-            key={alertItem.id}
-            className={`qf-alert-card-v2 qf-alert-${alertItem.type}`}
-          >
-            <div className="qf-alert-card-top-v2">
-              <div>
-                <h3>{alertItem.title}</h3>
-                <p>{alertItem.message}</p>
-              </div>
-              <span>{alertItem.time}</span>
-            </div>
-
-            <div className="qf-alert-card-meta">
-              <div className="qf-alert-meta-box">
-                <span>Ticket</span>
-                <strong>{alertItem.ticketNumber}</strong>
-              </div>
-
-              <div className="qf-alert-meta-box">
-                <span>Now Serving</span>
-                <strong>{alertItem.nowServing}</strong>
-              </div>
-
-              <div className="qf-alert-meta-box">
-                <span>Before You</span>
-                <strong>{alertItem.beforeYou}</strong>
-              </div>
-
-              <div className="qf-alert-meta-box">
-                <span>After You</span>
-                <strong>{alertItem.afterYou}</strong>
-              </div>
-
-              <div className="qf-alert-meta-box">
-                <span>Est. Wait</span>
-                <strong>{alertItem.estimatedWait}</strong>
-              </div>
-            </div>
+      <div className="qf-notification-list">
+        {filteredNotifications.length === 0 ? (
+          <div className="qf-empty-state-v2">
+            <div className="qf-empty-title">No notifications</div>
+            <p>Your queue updates will appear here.</p>
           </div>
-        ))}
+        ) : (
+          filteredNotifications.map((notificationItem) => {
+            const isRead = readNotificationIds.includes(notificationItem.id);
+
+            return (
+              <button
+                key={notificationItem.id}
+                type="button"
+                className={`qf-notification-card qf-notification-${notificationItem.type} ${
+                  isRead ? "read" : "unread"
+                }`}
+                onClick={() => markNotificationAsRead(notificationItem.id)}
+              >
+                <div className="qf-notification-card-top">
+                  <div className="qf-notification-title-wrap">
+                    <div className={`qf-notification-dot ${isRead ? "read" : ""}`}></div>
+
+                    <div>
+                      <h3>{notificationItem.title}</h3>
+                      <p>{notificationItem.message}</p>
+                    </div>
+                  </div>
+
+                  <span className="qf-notification-time">{notificationItem.time}</span>
+                </div>
+
+                {renderNotificationMetrics(notificationItem)}
+              </button>
+            );
+          })
+        )}
       </div>
     </section>
   );
@@ -1101,10 +1470,10 @@ function UserDashboard() {
         </div>
       </div>
 
-      <div className="qf-alert-filter-row">
+      <div className="qf-notification-filter-row">
         <button
           type="button"
-          className={`qf-alert-filter-pill ${historyFilter === "all" ? "active" : ""}`}
+          className={`qf-notification-filter-pill ${historyFilter === "all" ? "active" : ""}`}
           onClick={() => setHistoryFilter("all")}
         >
           All
@@ -1112,7 +1481,7 @@ function UserDashboard() {
 
         <button
           type="button"
-          className={`qf-alert-filter-pill ${historyFilter === "active" ? "active" : ""}`}
+          className={`qf-notification-filter-pill ${historyFilter === "active" ? "active" : ""}`}
           onClick={() => setHistoryFilter("active")}
         >
           Active
@@ -1120,7 +1489,7 @@ function UserDashboard() {
 
         <button
           type="button"
-          className={`qf-alert-filter-pill ${historyFilter === "completed" ? "active" : ""}`}
+          className={`qf-notification-filter-pill ${historyFilter === "completed" ? "active" : ""}`}
           onClick={() => setHistoryFilter("completed")}
         >
           Completed
@@ -1141,6 +1510,7 @@ function UserDashboard() {
                   <h3>{ticket.deptName}</h3>
                   <p>{ticket.ticket_number}</p>
                 </div>
+
                 <span className={getStatusClass(ticket)}>
                   {getDisplayStatus(ticket)}
                 </span>
@@ -1151,18 +1521,29 @@ function UserDashboard() {
                   <span>Lane</span>
                   <strong>{ticket.lane_type || "Regular"}</strong>
                 </div>
+
                 <div>
-                  <span>Before You</span>
-                  <strong>{ticket.status === "Done" ? "-" : getPeopleAhead(ticket)}</strong>
+                  <span>Numbers Before Turn</span>
+                  <strong>{getNumbersBeforeTurn(ticket)}</strong>
                 </div>
+
                 <div>
                   <span>Estimated Wait</span>
-                  <strong>{ticket.status === "Done" ? "-" : getEstimatedWait(ticket)}</strong>
+                  <strong>{getEstimatedWait(ticket)}</strong>
                 </div>
+
+                <div>
+                  <span>Now Serving</span>
+                  <strong>
+                    {getNowServingDisplay(ticket.deptName, ticket.lane_type || "Regular")}
+                  </strong>
+                </div>
+
                 <div>
                   <span>Status</span>
                   <strong>{getDisplayStatus(ticket)}</strong>
                 </div>
+
                 <div>
                   <span>Queued</span>
                   <strong>
@@ -1170,6 +1551,28 @@ function UserDashboard() {
                       ? ticket.created_at.toDate().toLocaleString()
                       : ticket.created_at?.seconds
                       ? new Date(ticket.created_at.seconds * 1000).toLocaleString()
+                      : "-"}
+                  </strong>
+                </div>
+
+                <div>
+                  <span>Called</span>
+                  <strong>
+                    {ticket.called_at?.toDate
+                      ? ticket.called_at.toDate().toLocaleString()
+                      : ticket.called_at?.seconds
+                      ? new Date(ticket.called_at.seconds * 1000).toLocaleString()
+                      : "-"}
+                  </strong>
+                </div>
+
+                <div>
+                  <span>Completed</span>
+                  <strong>
+                    {ticket.completed_at?.toDate
+                      ? ticket.completed_at.toDate().toLocaleString()
+                      : ticket.completed_at?.seconds
+                      ? new Date(ticket.completed_at.seconds * 1000).toLocaleString()
                       : "-"}
                   </strong>
                 </div>
@@ -1207,8 +1610,9 @@ function UserDashboard() {
         <div className="qf-setting-card">
           <div>
             <strong>Queue Alerts</strong>
-            <p>Receive queue position alerts like 3 ahead and next turn.</p>
+            <p>Receive notifications when your turn gets closer in the queue.</p>
           </div>
+
           <label className="qf-switch">
             <input
               type="checkbox"
@@ -1221,14 +1625,31 @@ function UserDashboard() {
 
         <div className="qf-setting-card">
           <div>
-            <strong>Request Updates</strong>
-            <p>Allow updates related to your queue progress.</p>
+            <strong>AI Notifications</strong>
+            <p>Receive AI-based predictions like turn approaching and queue movement updates.</p>
           </div>
+
           <label className="qf-switch">
             <input
               type="checkbox"
-              checked={requestUpdatesEnabled}
-              onChange={() => setRequestUpdatesEnabled((prev) => !prev)}
+              checked={aiNotificationsEnabled}
+              onChange={() => setAiNotificationsEnabled((prev) => !prev)}
+            />
+            <span className="qf-slider"></span>
+          </label>
+        </div>
+
+        <div className="qf-setting-card">
+          <div>
+            <strong>System Announcements</strong>
+            <p>Show general queue creation and status announcements.</p>
+          </div>
+
+          <label className="qf-switch">
+            <input
+              type="checkbox"
+              checked={systemAnnouncementsEnabled}
+              onChange={() => setSystemAnnouncementsEnabled((prev) => !prev)}
             />
             <span className="qf-slider"></span>
           </label>
@@ -1237,8 +1658,9 @@ function UserDashboard() {
         <div className="qf-setting-card">
           <div>
             <strong>Sound Notifications</strong>
-            <p>Enable or disable sound-based alerts in the dashboard.</p>
+            <p>Play a short sound when a new AI notification appears.</p>
           </div>
+
           <label className="qf-switch">
             <input
               type="checkbox"
@@ -1267,6 +1689,8 @@ function UserDashboard() {
 
           <input
             ref={fileInputRef}
+            id="account-profile-image"
+            name="account-profile-image"
             type="file"
             accept="image/*"
             className="qf-hidden-file-input"
@@ -1364,31 +1788,31 @@ function UserDashboard() {
   const renderActiveSection = () => {
     if (activeSection === "home") return renderHomeSection();
     if (activeSection === "queue") return renderQueueSection();
-    if (activeSection === "alerts") return renderAlertsSection();
+    if (activeSection === "notifications") return renderNotificationsSection();
     if (activeSection === "history") return renderHistorySection();
     if (activeSection === "settings") return renderSettingsSection();
     if (activeSection === "accounts") return renderAccountsSection();
+
     return renderHomeSection();
   };
 
   return (
     <div className="qf-app-layout-drawer">
-      {!sidebarOpen && (
-        <button
-          className="qf-hamburger"
-          onClick={() => setSidebarOpen(true)}
-          type="button"
-          aria-label="Open menu"
-        >
-          <span></span>
-          <span></span>
-          <span></span>
-        </button>
-      )}
+      <button
+        className="qf-hamburger"
+        onClick={() => setSidebarOpen(true)}
+        type="button"
+        aria-label="Open menu"
+      >
+        <span></span>
+        <span></span>
+        <span></span>
+      </button>
 
       <aside className={`qf-drawer ${sidebarOpen ? "open" : ""}`}>
         <div className="qf-drawer-top">
           <div className="qf-drawer-brand">QueueFree</div>
+
           <button
             className="qf-drawer-close"
             onClick={() => setSidebarOpen(false)}
@@ -1425,7 +1849,13 @@ function UserDashboard() {
                 setSidebarOpen(false);
               }}
             >
-              {item.label}
+              <span className="qf-menu-link-content">
+                <span>{item.label}</span>
+
+                {item.badge > 0 && (
+                  <span className="qf-menu-badge">{item.badge}</span>
+                )}
+              </span>
             </button>
           ))}
         </nav>
@@ -1436,6 +1866,69 @@ function UserDashboard() {
           className="qf-sidebar-overlay"
           onClick={() => setSidebarOpen(false)}
         ></div>
+      )}
+
+      {popupNotification && activeSection !== "notifications" && (
+        <div className="qf-ai-popup">
+          <div className={`qf-ai-popup-card qf-notification-${popupNotification.type}`}>
+            <div className="qf-ai-popup-left">
+              <div className="qf-ai-popup-badge">AI</div>
+
+              <div>
+                <h3>{popupNotification.title}</h3>
+                <p>{popupNotification.message}</p>
+              </div>
+            </div>
+
+            {popupNotification.hasMetrics && (
+              <div className="qf-ai-popup-mini-grid">
+                <div className="qf-ai-popup-mini-box">
+                  <span>Ticket</span>
+                  <strong>{popupNotification.ticketNumber}</strong>
+                </div>
+
+                <div className="qf-ai-popup-mini-box">
+                  <span>Before Turn</span>
+                  <strong>{popupNotification.numbersBeforeTurn}</strong>
+                </div>
+
+                <div className="qf-ai-popup-mini-box">
+                  <span>Est. Wait</span>
+                  <strong>{popupNotification.estimatedWait}</strong>
+                </div>
+              </div>
+            )}
+
+            <div className="qf-ai-popup-actions">
+              <button
+                type="button"
+                className="qf-ai-popup-secondary"
+                onClick={dismissPopupNotification}
+              >
+                Dismiss
+              </button>
+
+              <button
+                type="button"
+                className="qf-ai-popup-primary"
+                onClick={() => {
+                  setActiveSection("notifications");
+                  markNotificationAsRead(popupNotification.id);
+                }}
+              >
+                View
+              </button>
+
+              <button
+                type="button"
+                className="qf-ai-popup-close"
+                onClick={dismissPopupNotification}
+              >
+                ✕
+              </button>
+            </div>
+          </div>
+        </div>
       )}
 
       <main className="qf-main-content-full">{renderActiveSection()}</main>

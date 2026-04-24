@@ -9,9 +9,13 @@ import {
 import {
   collection,
   doc,
+  getDocs,
   onSnapshot,
+  query,
   setDoc,
-  updateDoc
+  updateDoc,
+  where,
+  writeBatch
 } from "firebase/firestore";
 import "./AdminDashboard.css";
 
@@ -51,49 +55,83 @@ function AdminDashboard() {
     "Admin";
 
   useEffect(() => {
-    const unsubDepartments = onSnapshot(collection(db, "departments"), (snapshot) => {
-      const data = snapshot.docs.map((docSnap) => ({
-        id: docSnap.id,
-        ...docSnap.data()
-      }));
-      setDepartments(data);
-    });
+    const unsubDepartments = onSnapshot(
+      collection(db, "departments"),
+      (snapshot) => {
+        const data = snapshot.docs.map((docSnap) => ({
+          id: docSnap.id,
+          ...docSnap.data()
+        }));
 
-    const unsubTickets = onSnapshot(collection(db, "queue_tickets"), (snapshot) => {
-      const data = snapshot.docs.map((docSnap) => ({
-        id: docSnap.id,
-        ...docSnap.data()
-      }));
-      setTickets(data);
-    });
+        data.sort((a, b) =>
+          String(a.dept_name || "").localeCompare(String(b.dept_name || ""))
+        );
 
-    const unsubTransactions = onSnapshot(collection(db, "transactions"), (snapshot) => {
-      const data = snapshot.docs.map((docSnap) => ({
-        id: docSnap.id,
-        ...docSnap.data()
-      }));
-      setTransactions(data);
-    });
+        setDepartments(data);
+      },
+      (error) => {
+        console.error("Departments listener error:", error);
+      }
+    );
 
-    const unsubUsers = onSnapshot(collection(db, "users"), (snapshot) => {
-      const data = snapshot.docs.map((docSnap) => ({
-        id: docSnap.id,
-        ...docSnap.data()
-      }));
-      setUsers(data);
+    const unsubTickets = onSnapshot(
+      collection(db, "queue_tickets"),
+      (snapshot) => {
+        const data = snapshot.docs.map((docSnap) => ({
+          id: docSnap.id,
+          ...docSnap.data()
+        }));
+        setTickets(data);
+      },
+      (error) => {
+        console.error("Tickets listener error:", error);
+      }
+    );
 
-      const officeMap = {};
-      const windowMap = {};
+    const unsubTransactions = onSnapshot(
+      collection(db, "transactions"),
+      (snapshot) => {
+        const data = snapshot.docs.map((docSnap) => ({
+          id: docSnap.id,
+          ...docSnap.data()
+        }));
+        setTransactions(data);
+      },
+      (error) => {
+        console.error("Transactions listener error:", error);
+      }
+    );
 
-      snapshot.docs.forEach((docSnap) => {
-        const userData = docSnap.data();
-        officeMap[docSnap.id] = userData.office_assignment || "";
-        windowMap[docSnap.id] = userData.window_assignment || "Window 1";
-      });
+    const unsubUsers = onSnapshot(
+      collection(db, "users"),
+      (snapshot) => {
+        const data = snapshot.docs.map((docSnap) => ({
+          id: docSnap.id,
+          ...docSnap.data()
+        }));
 
-      setStaffAssignments(officeMap);
-      setStaffWindowAssignments(windowMap);
-    });
+        data.sort((a, b) =>
+          String(a.email || "").localeCompare(String(b.email || ""))
+        );
+
+        setUsers(data);
+
+        const officeMap = {};
+        const windowMap = {};
+
+        snapshot.docs.forEach((docSnap) => {
+          const userData = docSnap.data();
+          officeMap[docSnap.id] = userData.office_assignment || "";
+          windowMap[docSnap.id] = userData.window_assignment || "Window 1";
+        });
+
+        setStaffAssignments(officeMap);
+        setStaffWindowAssignments(windowMap);
+      },
+      (error) => {
+        console.error("Users listener error:", error);
+      }
+    );
 
     return () => {
       unsubDepartments();
@@ -113,8 +151,12 @@ function AdminDashboard() {
   const totalPending = tickets.filter((ticket) => ticket.status === "Pending").length;
   const totalServing = tickets.filter((ticket) => ticket.status === "Serving").length;
   const totalDone = tickets.filter((ticket) => ticket.status === "Done").length;
-  const totalPriority = tickets.filter((ticket) => (ticket.lane_type || "Regular") === "Priority").length;
-  const totalRegular = tickets.filter((ticket) => (ticket.lane_type || "Regular") !== "Priority").length;
+  const totalPriority = tickets.filter(
+    (ticket) => (ticket.lane_type || "Regular") === "Priority"
+  ).length;
+  const totalRegular = tickets.filter(
+    (ticket) => (ticket.lane_type || "Regular") !== "Priority"
+  ).length;
 
   const userAccounts = useMemo(() => {
     return users.filter((user) => (user.role || "").toLowerCase() === "user");
@@ -169,13 +211,19 @@ function AdminDashboard() {
 
   const avgWaitTime = useMemo(() => {
     if (departments.length === 0) return 0;
-    const total = departments.reduce((sum, dept) => sum + (dept.avg_service_time || 0), 0);
+    const total = departments.reduce(
+      (sum, dept) => sum + Number(dept.avg_service_time || 0),
+      0
+    );
     return Math.round(total / departments.length);
   }, [departments]);
 
   const avgServiceSeconds = useMemo(() => {
     if (transactions.length === 0) return 0;
-    const totalSeconds = transactions.reduce((sum, item) => sum + (item.duration_sec || 0), 0);
+    const totalSeconds = transactions.reduce(
+      (sum, item) => sum + Number(item.duration_sec || 0),
+      0
+    );
     return Math.round(totalSeconds / transactions.length);
   }, [transactions]);
 
@@ -185,9 +233,15 @@ function AdminDashboard() {
     return {
       pending: deptTickets.filter((ticket) => ticket.status === "Pending").length,
       serving: deptTickets.filter((ticket) => ticket.status === "Serving").length,
+      paused: deptTickets.filter((ticket) => ticket.status === "Paused").length,
       done: deptTickets.filter((ticket) => ticket.status === "Done").length,
-      regular: deptTickets.filter((ticket) => (ticket.lane_type || "Regular") !== "Priority").length,
-      priority: deptTickets.filter((ticket) => (ticket.lane_type || "Regular") === "Priority").length,
+      active: deptTickets.filter((ticket) => ticket.status !== "Done").length,
+      regular: deptTickets.filter(
+        (ticket) => (ticket.lane_type || "Regular") !== "Priority"
+      ).length,
+      priority: deptTickets.filter(
+        (ticket) => (ticket.lane_type || "Regular") === "Priority"
+      ).length,
       total: deptTickets.length
     };
   };
@@ -271,34 +325,41 @@ function AdminDashboard() {
     if (!sorted.length) return "No queue data yet.";
 
     const top = sorted[0];
-    return `${top.label} currently has the highest activity with ${top.value} ticket${top.value === 1 ? "" : "s"}.`;
+
+    if (top.value === 0) {
+      return "No peak queue hour detected yet. The system will update this once users start joining queues.";
+    }
+
+    return `${top.label} currently has the highest queue activity with ${top.value} ticket${
+      top.value === 1 ? "" : "s"
+    }.`;
   }, [peakHourData]);
 
   const reportsData = useMemo(() => {
     return [
       {
-        title: "Daily Transaction Report",
+        title: "Daily Queue Report",
         subtitle: "Today overview",
-        value: `${totalDone} completed services`,
-        note: "Based on finished queue transactions today."
+        value: `${totalDone} completed queues`,
+        note: "Based on finished queue tickets today."
       },
       {
         title: "Weekly Queue Summary",
         subtitle: "All lanes",
         value: `${totalTickets} total tickets`,
-        note: "Combined regular and priority activity."
+        note: "Combined regular and priority queue activity."
       },
       {
         title: "Monthly Performance",
         subtitle: "System output",
         value: `${transactions.length} total transactions`,
-        note: `Average service time: ${avgServiceSeconds}s`
+        note: `Average service duration: ${avgServiceSeconds}s`
       },
       {
-        title: "Document Processing Time",
+        title: "Queue Service Time",
         subtitle: "Current average",
         value: `${avgServiceSeconds}s average`,
-        note: "Estimated from current completed transaction records."
+        note: "Estimated from current completed queue transaction records."
       }
     ];
   }, [totalDone, totalTickets, transactions.length, avgServiceSeconds]);
@@ -306,6 +367,7 @@ function AdminDashboard() {
   const getStatusClass = (status) => {
     if (status === "Serving") return "qf-admin-status qf-admin-status-serving";
     if (status === "Done") return "qf-admin-status qf-admin-status-done";
+    if (status === "Paused") return "qf-admin-status qf-admin-status-paused";
     return "qf-admin-status qf-admin-status-pending";
   };
 
@@ -313,9 +375,11 @@ function AdminDashboard() {
     if (value?.toDate) {
       return value.toDate().toLocaleString();
     }
+
     if (value?.seconds) {
       return new Date(value.seconds * 1000).toLocaleString();
     }
+
     return "-";
   };
 
@@ -324,6 +388,15 @@ function AdminDashboard() {
     if (proofData.startsWith("data:image")) return "image";
     if (proofData.startsWith("data:application/pdf")) return "pdf";
     return "unknown";
+  };
+
+  const getDepartmentNameById = (deptId) => {
+    const found = departments.find((dept) => dept.id === deptId);
+    return found?.dept_name || "-";
+  };
+
+  const getUserById = (userId) => {
+    return users.find((user) => user.id === userId) || null;
   };
 
   const handleToggleDepartmentStatus = async () => {
@@ -345,7 +418,7 @@ function AdminDashboard() {
         }.`
       );
     } catch (error) {
-      console.error(error);
+      console.error("TOGGLE DEPARTMENT STATUS ERROR:", error);
       alert("Failed to update department status.");
     } finally {
       setAdminLoading(false);
@@ -360,33 +433,55 @@ function AdminDashboard() {
       }
 
       const confirmReset = window.confirm(
-        `Are you sure you want to reset ${selectedDepartment.dept_name} queue counters?`
+        `Reset ${selectedDepartment.dept_name} queue?\n\nThis will clear active queue tickets, remove now-serving display, and restart new queue numbers from 1.`
       );
 
       if (!confirmReset) return;
 
       setAdminLoading(true);
 
-      const prefix =
-        selectedDepartment.queue_prefix ||
-        selectedDepartment.dept_name.charAt(0).toUpperCase();
+      const activeTicketQuery = query(
+        collection(db, "queue_tickets"),
+        where("dept_id", "==", selectedDepartment.id)
+      );
 
-      await updateDoc(doc(db, "departments", selectedDepartment.id), {
+      const ticketSnapshot = await getDocs(activeTicketQuery);
+      const batch = writeBatch(db);
+      const deptRef = doc(db, "departments", selectedDepartment.id);
+
+      batch.update(deptRef, {
         current_number: 0,
-        current_serving_display: `${prefix}000`,
+        current_serving_display: "-",
         last_number: 0,
         now_serving: 0,
         priority_last_number: 0,
         priority_now_serving_number: 0,
-        priority_now_serving_display: `${prefix}P000`,
+        priority_now_serving_display: "-",
         regular_last_number: 0,
         regular_now_serving_number: 0,
-        regular_now_serving_display: `${prefix}000`
+        regular_now_serving_display: "-"
       });
 
-      alert(`${selectedDepartment.dept_name} queue counters reset successfully.`);
+      ticketSnapshot.docs.forEach((ticketDoc) => {
+        const ticketData = ticketDoc.data();
+
+        if (ticketData.status !== "Done") {
+          batch.update(ticketDoc.ref, {
+            status: "Done",
+            reset_by_admin: true,
+            reset_at: new Date(),
+            completed_at: ticketData.completed_at || new Date()
+          });
+        }
+      });
+
+      await batch.commit();
+
+      alert(
+        `${selectedDepartment.dept_name} queue reset successfully. New queue numbers will start again at 1.`
+      );
     } catch (error) {
-      console.error(error);
+      console.error("RESET DEPARTMENT QUEUE ERROR:", error);
       alert("Failed to reset department queue.");
     } finally {
       setAdminLoading(false);
@@ -418,7 +513,7 @@ function AdminDashboard() {
         alert("Priority request moved back to pending.");
       }
     } catch (error) {
-      console.error(error);
+      console.error("PRIORITY DECISION ERROR:", error);
       alert("Failed to update priority request.");
     } finally {
       setAdminLoading(false);
@@ -444,7 +539,7 @@ function AdminDashboard() {
 
       alert("Staff assignment updated successfully.");
     } catch (error) {
-      console.error(error);
+      console.error("SAVE STAFF ASSIGNMENT ERROR:", error);
       alert("Failed to save staff assignment.");
     } finally {
       setAdminLoading(false);
@@ -461,7 +556,7 @@ function AdminDashboard() {
 
       alert(`Staff account is now ${nextStatus}.`);
     } catch (error) {
-      console.error(error);
+      console.error("STAFF STATUS CHANGE ERROR:", error);
       alert("Failed to update staff account status.");
     } finally {
       setAdminLoading(false);
@@ -482,7 +577,7 @@ function AdminDashboard() {
           : "Staff account archived successfully."
       );
     } catch (error) {
-      console.error(error);
+      console.error("TOGGLE STAFF ARCHIVE ERROR:", error);
       alert("Failed to update archive status.");
     } finally {
       setAdminLoading(false);
@@ -609,7 +704,7 @@ function AdminDashboard() {
 
       alert("Staff account created successfully.");
     } catch (error) {
-      console.error(error);
+      console.error("CREATE STAFF ERROR:", error);
 
       try {
         if (auth.currentUser && auth.currentUser.email !== currentUser?.email) {
@@ -656,7 +751,7 @@ function AdminDashboard() {
         <strong>{totalTickets}</strong>
       </div>
       <div className="qf-admin-top-stat">
-        <span>Active Requests</span>
+        <span>Active Queues</span>
         <strong>{totalRequests}</strong>
       </div>
       <div className="qf-admin-top-stat">
@@ -680,6 +775,8 @@ function AdminDashboard() {
 
         <div className="qf-admin-control-bar">
           <select
+            id="admin-selected-office"
+            name="admin-selected-office"
             value={selectedDeptName}
             onChange={(e) => setSelectedDeptName(e.target.value)}
             className="qf-admin-select"
@@ -714,6 +811,11 @@ function AdminDashboard() {
           </button>
         </div>
 
+        <div className="qf-admin-reset-note">
+          Reset Queue clears active tickets for the selected office, clears now serving,
+          and restarts new queue numbers from 1.
+        </div>
+
         <div className="qf-admin-offices-list">
           {departments.map((dept) => {
             const counts = getDepartmentCounts(dept.id);
@@ -722,7 +824,13 @@ function AdminDashboard() {
               <div key={dept.id} className="qf-admin-office-row">
                 <div className="qf-admin-office-left">
                   <h3>{dept.dept_name}</h3>
-                  <span className={dept.is_active ? "qf-admin-office-status active" : "qf-admin-office-status inactive"}>
+                  <span
+                    className={
+                      dept.is_active
+                        ? "qf-admin-office-status active"
+                        : "qf-admin-office-status inactive"
+                    }
+                  >
                     {dept.is_active ? "Active" : "Inactive"}
                   </span>
                 </div>
@@ -741,6 +849,11 @@ function AdminDashboard() {
 
                 <div className="qf-admin-office-metrics">
                   <div className="qf-admin-office-metric">
+                    <span>Active</span>
+                    <strong>{counts.active}</strong>
+                  </div>
+
+                  <div className="qf-admin-office-metric">
                     <span>Pending</span>
                     <strong>{counts.pending}</strong>
                   </div>
@@ -751,18 +864,13 @@ function AdminDashboard() {
                   </div>
 
                   <div className="qf-admin-office-metric">
+                    <span>Paused</span>
+                    <strong>{counts.paused}</strong>
+                  </div>
+
+                  <div className="qf-admin-office-metric">
                     <span>Done</span>
                     <strong>{counts.done}</strong>
-                  </div>
-
-                  <div className="qf-admin-office-metric">
-                    <span>Regular</span>
-                    <strong>{counts.regular}</strong>
-                  </div>
-
-                  <div className="qf-admin-office-metric">
-                    <span>Priority</span>
-                    <strong>{counts.priority}</strong>
                   </div>
 
                   <div className="qf-admin-office-metric">
@@ -773,6 +881,10 @@ function AdminDashboard() {
               </div>
             );
           })}
+
+          {departments.length === 0 && (
+            <div className="qf-admin-empty-state">No department records found.</div>
+          )}
         </div>
       </div>
     </div>
@@ -883,32 +995,54 @@ function AdminDashboard() {
           <div className="qf-admin-empty-state">No tickets yet.</div>
         ) : (
           <div className="qf-admin-record-grid">
-            {recentTickets.map((ticket) => (
-              <div key={ticket.id} className="qf-admin-record-card">
-                <div className="qf-admin-record-top">
-                  <div className="qf-admin-record-title-wrap">
-                    <h3>{ticket.ticket_number || "-"}</h3>
-                    <p>{ticket.lane_type || "Regular"} Lane</p>
+            {recentTickets.map((ticket) => {
+              const linkedUser = getUserById(ticket.user_id);
+
+              return (
+                <div key={ticket.id} className="qf-admin-record-card">
+                  <div className="qf-admin-record-top">
+                    <div className="qf-admin-record-title-wrap">
+                      <h3>{ticket.ticket_number || "-"}</h3>
+                      <p>{ticket.lane_type || "Regular"} Lane</p>
+                    </div>
+
+                    <span className={getStatusClass(ticket.status)}>
+                      {ticket.status || "Pending"}
+                    </span>
                   </div>
 
-                  <span className={getStatusClass(ticket.status)}>
-                    {ticket.status}
-                  </span>
+                  <div className="qf-admin-record-meta">
+                    <div className="qf-admin-info-box">
+                      <span>Office</span>
+                      <strong>{ticket.dept_name || getDepartmentNameById(ticket.dept_id)}</strong>
+                    </div>
+
+                    <div className="qf-admin-info-box">
+                      <span>User</span>
+                      <strong>
+                        {linkedUser
+                          ? `${linkedUser.first_name || ""} ${
+                              linkedUser.last_name || ""
+                            }`.trim() ||
+                            linkedUser.email ||
+                            "-"
+                          : ticket.user_id || "-"}
+                      </strong>
+                    </div>
+
+                    <div className="qf-admin-info-box">
+                      <span>Priority Type</span>
+                      <strong>{ticket.priority_type || "Regular"}</strong>
+                    </div>
+
+                    <div className="qf-admin-info-box">
+                      <span>Queued</span>
+                      <strong>{getReadableDateTime(ticket.created_at)}</strong>
+                    </div>
+                  </div>
                 </div>
-
-                <div className="qf-admin-record-meta">
-                  <div className="qf-admin-info-box">
-                    <span>User ID</span>
-                    <strong className="qf-admin-break-text">{ticket.user_id || "-"}</strong>
-                  </div>
-
-                  <div className="qf-admin-info-box">
-                    <span>Priority Type</span>
-                    <strong>{ticket.priority_type || "Regular"}</strong>
-                  </div>
-                </div>
-              </div>
-            ))}
+              );
+            })}
           </div>
         )}
       </div>
@@ -942,16 +1076,24 @@ function AdminDashboard() {
 
                 <div className="qf-admin-record-meta">
                   <div className="qf-admin-info-box">
+                    <span>Department</span>
+                    <strong>{getDepartmentNameById(item.dept_id)}</strong>
+                  </div>
+
+                  <div className="qf-admin-info-box">
                     <span>Duration</span>
                     <strong>{item.duration_sec || 0}s</strong>
                   </div>
 
                   <div className="qf-admin-info-box">
+                    <span>Window</span>
+                    <strong>{item.window_assignment || "-"}</strong>
+                  </div>
+
+                  <div className="qf-admin-info-box">
                     <span>End Time</span>
                     <strong className="qf-admin-break-text">
-                      {item.end_time?.toDate
-                        ? item.end_time.toDate().toLocaleString()
-                        : "-"}
+                      {getReadableDateTime(item.end_time)}
                     </strong>
                   </div>
                 </div>
@@ -996,7 +1138,8 @@ function AdminDashboard() {
 
                 <div className="qf-admin-user-main">
                   <h3>
-                    {`${user.first_name || ""} ${user.last_name || ""}`.trim() || "Unnamed User"}
+                    {`${user.first_name || ""} ${user.last_name || ""}`.trim() ||
+                      "Unnamed User"}
                   </h3>
                   <p>{user.email || "-"}</p>
                 </div>
@@ -1051,7 +1194,10 @@ function AdminDashboard() {
     const proofType = getProofType(proofData);
 
     return (
-      <div className="qf-admin-proof-overlay" onClick={() => setProofPreviewUser(null)}>
+      <div
+        className="qf-admin-proof-overlay"
+        onClick={() => setProofPreviewUser(null)}
+      >
         <div
           className="qf-admin-proof-modal"
           onClick={(e) => e.stopPropagation()}
@@ -1060,7 +1206,9 @@ function AdminDashboard() {
             <div>
               <h3>Priority Proof Preview</h3>
               <p>
-                {`${proofPreviewUser.first_name || ""} ${proofPreviewUser.last_name || ""}`.trim() ||
+                {`${proofPreviewUser.first_name || ""} ${
+                  proofPreviewUser.last_name || ""
+                }`.trim() ||
                   proofPreviewUser.email ||
                   "User"}
               </p>
@@ -1169,7 +1317,8 @@ function AdminDashboard() {
                 <div className="qf-admin-priority-head">
                   <div>
                     <h3>
-                      {`${user.first_name || ""} ${user.last_name || ""}`.trim() || "Unnamed User"}
+                      {`${user.first_name || ""} ${user.last_name || ""}`.trim() ||
+                        "Unnamed User"}
                     </h3>
                     <p>{user.email || "-"}</p>
                   </div>
@@ -1203,7 +1352,9 @@ function AdminDashboard() {
                   <div className="qf-admin-user-meta-box">
                     <span>Proof Preview</span>
                     <strong>
-                      {user.priority_proof_data ? getProofType(user.priority_proof_data).toUpperCase() : "NONE"}
+                      {user.priority_proof_data
+                        ? getProofType(user.priority_proof_data).toUpperCase()
+                        : "NONE"}
                     </strong>
                   </div>
 
@@ -1263,7 +1414,8 @@ function AdminDashboard() {
 
                 <div className="qf-admin-user-main">
                   <h3>
-                    {`${user.first_name || ""} ${user.last_name || ""}`.trim() || "Unnamed User"}
+                    {`${user.first_name || ""} ${user.last_name || ""}`.trim() ||
+                      "Unnamed User"}
                   </h3>
                   <p>{user.email || "-"}</p>
                 </div>
@@ -1288,7 +1440,9 @@ function AdminDashboard() {
                 <div className="qf-admin-user-meta-box">
                   <span>Preview Type</span>
                   <strong>
-                    {user.priority_proof_data ? getProofType(user.priority_proof_data).toUpperCase() : "NONE"}
+                    {user.priority_proof_data
+                      ? getProofType(user.priority_proof_data).toUpperCase()
+                      : "NONE"}
                   </strong>
                 </div>
               </div>
@@ -1328,7 +1482,10 @@ function AdminDashboard() {
       <div className="qf-admin-section-card">
         <div className="qf-admin-section-headline">
           <h2>Staff Management</h2>
-          <p>Assign office and window, create staff accounts, activate or deactivate staff, and archive accounts when needed.</p>
+          <p>
+            Assign office and window, create staff accounts, activate or deactivate
+            staff, and archive accounts when needed.
+          </p>
         </div>
 
         <div className="qf-admin-priority-summary">
@@ -1354,8 +1511,10 @@ function AdminDashboard() {
 
           <div className="qf-admin-staff-create-grid">
             <div className="qf-admin-field-group">
-              <label>First Name</label>
+              <label htmlFor="new-staff-first-name">First Name</label>
               <input
+                id="new-staff-first-name"
+                name="new-staff-first-name"
                 type="text"
                 className="qf-admin-text-input"
                 value={newStaff.first_name}
@@ -1370,8 +1529,10 @@ function AdminDashboard() {
             </div>
 
             <div className="qf-admin-field-group">
-              <label>Last Name</label>
+              <label htmlFor="new-staff-last-name">Last Name</label>
               <input
+                id="new-staff-last-name"
+                name="new-staff-last-name"
                 type="text"
                 className="qf-admin-text-input"
                 value={newStaff.last_name}
@@ -1386,8 +1547,10 @@ function AdminDashboard() {
             </div>
 
             <div className="qf-admin-field-group">
-              <label>Email</label>
+              <label htmlFor="new-staff-email">Email</label>
               <input
+                id="new-staff-email"
+                name="new-staff-email"
                 type="email"
                 className="qf-admin-text-input"
                 value={newStaff.email}
@@ -1402,8 +1565,10 @@ function AdminDashboard() {
             </div>
 
             <div className="qf-admin-field-group">
-              <label>Password</label>
+              <label htmlFor="new-staff-password">Password</label>
               <input
+                id="new-staff-password"
+                name="new-staff-password"
                 type="password"
                 className="qf-admin-text-input"
                 value={newStaff.password}
@@ -1418,8 +1583,10 @@ function AdminDashboard() {
             </div>
 
             <div className="qf-admin-field-group">
-              <label>Office Assignment</label>
+              <label htmlFor="new-staff-office">Office Assignment</label>
               <select
+                id="new-staff-office"
+                name="new-staff-office"
                 className="qf-admin-select"
                 value={newStaff.office_assignment}
                 onChange={(e) =>
@@ -1439,8 +1606,10 @@ function AdminDashboard() {
             </div>
 
             <div className="qf-admin-field-group">
-              <label>Window Assignment</label>
+              <label htmlFor="new-staff-window">Window Assignment</label>
               <select
+                id="new-staff-window"
+                name="new-staff-window"
                 className="qf-admin-select"
                 value={newStaff.window_assignment}
                 onChange={(e) =>
@@ -1479,12 +1648,16 @@ function AdminDashboard() {
               <div key={staffUser.id} className="qf-admin-staff-card">
                 <div className="qf-admin-user-top">
                   <div className="qf-admin-user-avatar staff">
-                    {String(staffUser.first_name || staffUser.email || "S").charAt(0).toUpperCase()}
+                    {String(staffUser.first_name || staffUser.email || "S")
+                      .charAt(0)
+                      .toUpperCase()}
                   </div>
 
                   <div className="qf-admin-user-main">
                     <h3>
-                      {`${staffUser.first_name || ""} ${staffUser.last_name || ""}`.trim() || "Unnamed Staff"}
+                      {`${staffUser.first_name || ""} ${
+                        staffUser.last_name || ""
+                      }`.trim() || "Unnamed Staff"}
                     </h3>
                     <p>{staffUser.email || "-"}</p>
                   </div>
@@ -1492,8 +1665,12 @@ function AdminDashboard() {
 
                 <div className="qf-admin-staff-form-grid">
                   <div className="qf-admin-field-group">
-                    <label>Office Assignment</label>
+                    <label htmlFor={`staff-office-${staffUser.id}`}>
+                      Office Assignment
+                    </label>
                     <select
+                      id={`staff-office-${staffUser.id}`}
+                      name={`staff-office-${staffUser.id}`}
                       className="qf-admin-select"
                       value={staffAssignments[staffUser.id] || ""}
                       onChange={(e) =>
@@ -1513,8 +1690,12 @@ function AdminDashboard() {
                   </div>
 
                   <div className="qf-admin-field-group">
-                    <label>Window Assignment</label>
+                    <label htmlFor={`staff-window-${staffUser.id}`}>
+                      Window Assignment
+                    </label>
                     <select
+                      id={`staff-window-${staffUser.id}`}
+                      name={`staff-window-${staffUser.id}`}
                       className="qf-admin-select"
                       value={staffWindowAssignments[staffUser.id] || "Window 1"}
                       onChange={(e) =>
@@ -1614,16 +1795,18 @@ function AdminDashboard() {
 
   return (
     <div className="qf-admin-layout">
-      <button
-        className="qf-admin-corner-menu-btn"
-        onClick={() => setSidebarOpen(true)}
-        type="button"
-        aria-label="Open menu"
-      >
-        <span></span>
-        <span></span>
-        <span></span>
-      </button>
+      {!sidebarOpen && (
+        <button
+          className="qf-admin-corner-menu-btn"
+          onClick={() => setSidebarOpen(true)}
+          type="button"
+          aria-label="Open menu"
+        >
+          <span></span>
+          <span></span>
+          <span></span>
+        </button>
+      )}
 
       <main className="qf-admin-main">
         <section className="qf-admin-header-card">
@@ -1673,7 +1856,9 @@ function AdminDashboard() {
             <button
               key={item.key}
               type="button"
-              className={`qf-admin-drawer-link ${activeSection === item.key ? "active" : ""}`}
+              className={`qf-admin-drawer-link ${
+                activeSection === item.key ? "active" : ""
+              }`}
               onClick={() => {
                 setActiveSection(item.key);
                 setSidebarOpen(false);

@@ -6,12 +6,17 @@
     radial-gradient(circle at bottom left, rgba(59, 130, 246, 0.14) 0%, rgba(59, 130, 246, 0.05) 18%, transparent 34%),
     linear-gradient(180deg, #02060d 0%, #030812 42%, #02050a 100%);
   overflow-x: hidden;
+  box-sizing: border-box;
+}
+
+.qf-admin-layout * {
+  box-sizing: border-box;
 }
 
 .qf-admin-corner-menu-btn {
   position: fixed;
-  top: 14px;
-  left: 14px;
+  top: 20px;
+  left: 20px;
   z-index: 1600;
   width: 52px;
   height: 52px;
@@ -19,7 +24,7 @@
   border: 1px solid rgba(255, 255, 255, 0.10);
   border-radius: 16px;
   background:
-    linear-gradient(180deg, rgba(255,255,255,0.06), rgba(255,255,255,0.02)),
+    linear-gradient(180deg, rgba(255,255,255,0.07), rgba(255,255,255,0.02)),
     rgba(8, 15, 28, 0.96);
   box-shadow:
     0 14px 30px rgba(0, 0, 0, 0.26),
@@ -30,6 +35,15 @@
   justify-content: center;
   gap: 5px;
   cursor: pointer;
+  transition: 0.2s ease;
+}
+
+.qf-admin-corner-menu-btn:hover {
+  transform: translateY(-1px);
+  border-color: rgba(168, 85, 247, 0.35);
+  box-shadow:
+    0 16px 34px rgba(0, 0, 0, 0.30),
+    0 0 0 4px rgba(168, 85, 247, 0.08);
 }
 
 .qf-admin-corner-menu-btn span {
@@ -47,22 +61,26 @@
   box-sizing: border-box;
   overflow-x: hidden;
   display: grid;
-  gap: 22px;
+  gap: 18px;
 }
 
 .qf-admin-header-card,
 .qf-admin-section-card {
   width: 100%;
-  padding: 28px;
-  border-radius: 28px;
+  padding: 26px;
+  border-radius: 26px;
   border: 1px solid rgba(255, 255, 255, 0.08);
   background:
     radial-gradient(circle at top right, rgba(168, 85, 247, 0.16), transparent 28%),
     linear-gradient(180deg, rgba(5, 10, 18, 0.90), rgba(2, 5, 10, 0.96));
   box-shadow:
-    0 24px 60px rgba(0, 0, 0, 0.34),
+    0 20px 50px rgba(0, 0, 0, 0.30),
     inset 0 1px 0 rgba(255, 255, 255, 0.03);
   box-sizing: border-box;
+}
+
+.qf-admin-header-card {
+  padding-left: 78px;
 }
 
 .qf-admin-header-row {
@@ -70,21 +88,22 @@
   justify-content: space-between;
   align-items: flex-start;
   gap: 16px;
-  margin-bottom: 22px;
+  margin-bottom: 20px;
 }
 
 .qf-admin-mini {
   margin: 0;
   font-size: 12px;
   letter-spacing: 0.08em;
-  color: #93c5fd;
+  color: #c4b5fd;
   text-transform: uppercase;
+  font-weight: 800;
 }
 
 .qf-admin-header-top h1 {
   margin: 8px 0 0 0;
   color: #ffffff;
-  font-size: 42px;
+  font-size: 40px;
   font-weight: 900;
   line-height: 1.05;
 }
@@ -113,7 +132,7 @@
 .qf-admin-top-stats {
   display: grid;
   grid-template-columns: repeat(4, minmax(0, 1fr));
-  gap: 14px;
+  gap: 12px;
 }
 
 .qf-admin-top-stat {
@@ -142,7 +161,8 @@
 
 .qf-admin-content-grid {
   display: grid;
-  gap: 20px;
+  gap: 18px;
+  width: 100%;
 }
 
 .qf-admin-section-headline {
@@ -169,8 +189,20 @@
 
 .qf-admin-control-bar {
   display: grid;
-  grid-template-columns: 1fr auto auto;
+  grid-template-columns: minmax(240px, 1fr) auto auto;
   gap: 12px;
+  margin-bottom: 12px;
+  align-items: center;
+}
+
+.qf-admin-reset-note {
+  padding: 13px 16px;
+  border-radius: 16px;
+  background: rgba(245, 158, 11, 0.10);
+  border: 1px solid rgba(245, 158, 11, 0.18);
+  color: #fcd34d;
+  font-size: 13px;
+  line-height: 1.6;
   margin-bottom: 18px;
 }
 
@@ -186,6 +218,11 @@
   font-size: 14px;
   outline: none;
   box-sizing: border-box;
+}
+
+.qf-admin-select option {
+  background: #0f172a;
+  color: #ffffff;
 }
 
 .qf-admin-text-input::placeholder {
@@ -209,6 +246,7 @@
 .qf-admin-warning-btn,
 .qf-admin-danger-btn,
 .qf-admin-proof-download {
+  min-height: 52px;
   height: 52px;
   padding: 0 20px;
   border: none;
@@ -222,10 +260,12 @@
   justify-content: center;
   text-decoration: none;
   box-sizing: border-box;
+  white-space: nowrap;
 }
 
 .qf-admin-primary-btn {
   background: linear-gradient(135deg, #8b5cf6 0%, #7c3aed 100%);
+  box-shadow: 0 12px 26px rgba(139, 92, 246, 0.22);
 }
 
 .qf-admin-secondary-btn,
@@ -258,7 +298,7 @@
 .qf-admin-reports-list,
 .qf-admin-priority-list {
   display: grid;
-  gap: 16px;
+  gap: 14px;
 }
 
 .qf-admin-office-row,
@@ -276,11 +316,12 @@
     #0b1220;
   border: 1px solid rgba(148, 163, 184, 0.12);
   box-shadow: 0 12px 24px rgba(0, 0, 0, 0.16);
+  min-width: 0;
 }
 
 .qf-admin-office-row {
   display: grid;
-  gap: 18px;
+  gap: 16px;
 }
 
 .qf-admin-office-left {
@@ -299,10 +340,13 @@
 
 .qf-admin-office-status {
   display: inline-flex;
+  align-items: center;
+  justify-content: center;
   padding: 6px 12px;
   border-radius: 999px;
   font-size: 12px;
   font-weight: 800;
+  white-space: nowrap;
 }
 
 .qf-admin-office-status.active {
@@ -333,6 +377,7 @@
   border-radius: 16px;
   background: #0f172a;
   border: 1px solid rgba(148, 163, 184, 0.10);
+  min-width: 0;
 }
 
 .qf-admin-serving-box span,
@@ -359,6 +404,7 @@
   font-weight: 800;
   line-height: 1.5;
   word-break: break-word;
+  overflow-wrap: anywhere;
 }
 
 .qf-admin-serving-box.priority strong {
@@ -402,6 +448,7 @@
   border: 1px solid rgba(34, 197, 94, 0.24);
   font-size: 12px;
   font-weight: 800;
+  white-space: nowrap;
 }
 
 .qf-admin-bar-list {
@@ -411,7 +458,7 @@
 
 .qf-admin-bar-row {
   display: grid;
-  grid-template-columns: 90px 1fr 50px;
+  grid-template-columns: 90px minmax(0, 1fr) 50px;
   gap: 12px;
   align-items: center;
 }
@@ -437,6 +484,10 @@
   background: linear-gradient(135deg, #2ea8ff 0%, #22c55e 100%);
 }
 
+.qf-admin-insight-box {
+  margin-top: 18px;
+}
+
 .qf-admin-insight-title {
   color: #e879f9;
   font-size: 13px;
@@ -458,7 +509,7 @@
 
 .qf-admin-report-card {
   display: grid;
-  grid-template-columns: 1fr auto;
+  grid-template-columns: minmax(0, 1fr) auto;
   gap: 16px;
   align-items: center;
 }
@@ -493,6 +544,7 @@
 }
 
 .qf-admin-report-btn {
+  min-height: 46px;
   padding: 12px 18px;
   border: none;
   border-radius: 14px;
@@ -510,7 +562,7 @@
 .qf-admin-staff-create-grid {
   display: grid;
   grid-template-columns: repeat(auto-fit, minmax(320px, 1fr));
-  gap: 16px;
+  gap: 14px;
 }
 
 .qf-admin-record-top,
@@ -536,6 +588,7 @@
   color: #ffffff;
   font-size: 20px;
   font-weight: 800;
+  overflow-wrap: anywhere;
 }
 
 .qf-admin-record-top p,
@@ -547,6 +600,7 @@
   line-height: 1.6;
   text-transform: uppercase;
   letter-spacing: 0.08em;
+  overflow-wrap: anywhere;
 }
 
 .qf-admin-record-meta,
@@ -569,6 +623,7 @@
   font-size: 12px;
   font-weight: 800;
   text-align: center;
+  white-space: nowrap;
 }
 
 .qf-admin-status-pending {
@@ -603,6 +658,7 @@
   text-align: center;
   color: #94a3b8;
   font-size: 14px;
+  line-height: 1.7;
 }
 
 .qf-admin-break-text {
@@ -867,19 +923,25 @@
 
 @media (max-width: 768px) {
   .qf-admin-corner-menu-btn {
-    top: 12px;
-    left: 12px;
+    top: 16px;
+    left: 16px;
     width: 48px;
     height: 48px;
     min-width: 48px;
   }
 
   .qf-admin-main {
-    padding: 16px;
+    padding: 14px;
     padding-top: 76px;
+    gap: 14px;
   }
 
-  .qf-admin-header-card,
+  .qf-admin-header-card {
+    padding: 20px;
+    padding-top: 76px;
+    border-radius: 22px;
+  }
+
   .qf-admin-section-card,
   .qf-admin-proof-modal {
     padding: 20px;
@@ -893,6 +955,10 @@
 
   .qf-admin-header-top h1 {
     font-size: 34px;
+  }
+
+  .qf-admin-section-headline h2 {
+    font-size: 24px;
   }
 
   .qf-admin-top-stats,
@@ -914,7 +980,8 @@
   .qf-admin-record-top,
   .qf-admin-user-top,
   .qf-admin-priority-head,
-  .qf-admin-proof-modal-top {
+  .qf-admin-proof-modal-top,
+  .qf-admin-section-head {
     flex-direction: column;
     align-items: flex-start;
   }
@@ -940,5 +1007,42 @@
   .qf-admin-proof-pdf {
     max-height: 55vh;
     height: 55vh;
+  }
+}
+
+@media (max-width: 480px) {
+  .qf-admin-main {
+    padding-left: 12px;
+    padding-right: 12px;
+  }
+
+  .qf-admin-header-top h1 {
+    font-size: 30px;
+  }
+
+  .qf-admin-header-card,
+  .qf-admin-section-card {
+    padding-left: 16px;
+    padding-right: 16px;
+  }
+
+  .qf-admin-header-card {
+    padding-top: 74px;
+  }
+
+  .qf-admin-office-row,
+  .qf-admin-peak-card,
+  .qf-admin-report-card,
+  .qf-admin-record-card,
+  .qf-admin-user-card,
+  .qf-admin-priority-card,
+  .qf-admin-staff-card,
+  .qf-admin-staff-create-card {
+    padding: 16px;
+    border-radius: 18px;
+  }
+
+  .qf-admin-drawer {
+    width: 280px;
   }
 }

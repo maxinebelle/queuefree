@@ -8,6 +8,7 @@ import {
   getDocs,
   onSnapshot,
   query,
+  serverTimestamp,
   updateDoc,
   where
 } from "firebase/firestore";
@@ -41,6 +42,7 @@ function StaffDashboard() {
     if (assignedOffice && DEPARTMENT_NAMES.includes(assignedOffice)) {
       return [assignedOffice];
     }
+
     return DEPARTMENT_NAMES;
   }, [assignedOffice]);
 
@@ -62,6 +64,7 @@ function StaffDashboard() {
         (snapshot) => {
           if (!snapshot.empty) {
             const docSnap = snapshot.docs[0];
+
             setDepartmentData((prev) => ({
               ...prev,
               [deptName]: {
@@ -81,12 +84,14 @@ function StaffDashboard() {
       collection(db, "users"),
       (snapshot) => {
         const mapData = {};
+
         snapshot.docs.forEach((docSnap) => {
           mapData[docSnap.id] = {
             id: docSnap.id,
             ...docSnap.data()
           };
         });
+
         setUsersMap(mapData);
       },
       (error) => {
@@ -105,7 +110,10 @@ function StaffDashboard() {
   }, [departmentData, selectedDeptName]);
 
   useEffect(() => {
-    if (!selectedDept) return;
+    if (!selectedDept) {
+      setTickets([]);
+      return;
+    }
 
     const q = query(
       collection(db, "queue_tickets"),
@@ -128,7 +136,8 @@ function StaffDashboard() {
                 "Unknown User"
               : "Unknown User",
             student_no: linkedUser?.student_no || "-",
-            priority_status: linkedUser?.priority_status || "not_applicable"
+            priority_status: linkedUser?.priority_status || "not_applicable",
+            user_email: linkedUser?.email || "-"
           };
         });
 
@@ -150,13 +159,16 @@ function StaffDashboard() {
         if (ticket.status === "Serving") return 0;
         if (ticket.status === "Paused") return 1;
         if (ticket.status === "Pending") return 2;
-        return 3;
+        if (ticket.status === "Done") return 3;
+        return 4;
       };
 
       const aStatusOrder = getStatusOrder(a);
       const bStatusOrder = getStatusOrder(b);
 
-      if (aStatusOrder !== bStatusOrder) return aStatusOrder - bStatusOrder;
+      if (aStatusOrder !== bStatusOrder) {
+        return aStatusOrder - bStatusOrder;
+      }
 
       if (
         (a.lane_type || "Regular") === "Priority" &&
@@ -234,15 +246,114 @@ function StaffDashboard() {
     return servingTickets[0] || null;
   }, [servingTickets]);
 
+  const selectedDeptActiveCount = useMemo(() => {
+    return sortedTickets.filter(
+      (ticket) =>
+        ticket.status === "Pending" ||
+        ticket.status === "Serving" ||
+        ticket.status === "Paused"
+    ).length;
+  }, [sortedTickets]);
+
+  const selectedDeptTotalCount = useMemo(() => {
+    return sortedTickets.length;
+  }, [sortedTickets]);
+
   const getAverageWaitMinutes = () => {
     const avg = selectedDept?.avg_service_time || 0;
     return `${avg} min`;
+  };
+
+  const getReadableDateTime = (value) => {
+    if (value?.toDate) {
+      return value.toDate().toLocaleString();
+    }
+
+    if (value?.seconds) {
+      return new Date(value.seconds * 1000).toLocaleString();
+    }
+
+    if (value instanceof Date) {
+      return value.toLocaleString();
+    }
+
+    return "-";
+  };
+
+  const getEstimatedWaitForTicket = (ticket) => {
+    if (!ticket || ticket.status === "Serving" || ticket.status === "Done") {
+      return "0 min";
+    }
+
+    const avg = selectedDept?.avg_service_time || 0;
+    const laneType = ticket.lane_type || "Regular";
+
+    const sameLaneActive = sortedTickets
+      .filter(
+        (item) =>
+          item.status !== "Done" &&
+          item.dept_id === ticket.dept_id &&
+          (item.lane_type || "Regular") === laneType
+      )
+      .sort((a, b) => {
+        const aServing = a.status === "Serving" ? 0 : 1;
+        const bServing = b.status === "Serving" ? 0 : 1;
+
+        if (aServing !== bServing) return aServing - bServing;
+
+        return (a.lane_number || 0) - (b.lane_number || 0);
+      });
+
+    const index = sameLaneActive.findIndex((item) => item.id === ticket.id);
+
+    if (index < 0) return "-";
+
+    return `${index * avg} min`;
+  };
+
+  const getQueuePositionLabel = (ticket) => {
+    if (!ticket) return "-";
+
+    if (ticket.status === "Done") {
+      return "Completed";
+    }
+
+    if (ticket.status === "Serving") {
+      return "Now serving";
+    }
+
+    const laneType = ticket.lane_type || "Regular";
+
+    const sameLaneActive = sortedTickets
+      .filter(
+        (item) =>
+          item.status !== "Done" &&
+          item.dept_id === ticket.dept_id &&
+          (item.lane_type || "Regular") === laneType
+      )
+      .sort((a, b) => {
+        const aServing = a.status === "Serving" ? 0 : 1;
+        const bServing = b.status === "Serving" ? 0 : 1;
+
+        if (aServing !== bServing) return aServing - bServing;
+
+        return (a.lane_number || 0) - (b.lane_number || 0);
+      });
+
+    const index = sameLaneActive.findIndex((item) => item.id === ticket.id);
+
+    if (index < 0) return "-";
+
+    if (index === 0) return "Next in line";
+
+    return `${index} queue number${index === 1 ? "" : "s"} before turn`;
   };
 
   const updateDepartmentServingDisplay = async (ticketData) => {
     if (!selectedDept) return;
 
     const deptRef = doc(db, "departments", selectedDept.id);
+
     const payload = {
       current_number: ticketData?.lane_number || 0,
       current_serving_display: ticketData?.ticket_number || "-"
@@ -263,6 +374,7 @@ function StaffDashboard() {
     if (!selectedDept) return;
 
     const deptRef = doc(db, "departments", selectedDept.id);
+
     const payload = {
       current_number: 0,
       current_serving_display: "-"
@@ -309,6 +421,7 @@ function StaffDashboard() {
       );
 
       const pendingSnapshot = await getDocs(pendingQuery);
+
       const pendingData = pendingSnapshot.docs.map((docSnap) => ({
         id: docSnap.id,
         ref: docSnap.ref,
@@ -330,11 +443,9 @@ function StaffDashboard() {
         return;
       }
 
-      const now = new Date();
-
       await updateDoc(nextTicket.ref, {
         status: "Serving",
-        called_at: now,
+        called_at: serverTimestamp(),
         window_assignment: assignedWindow || "Window 1",
         served_by: currentUser?.uid || ""
       });
@@ -351,7 +462,7 @@ function StaffDashboard() {
 
       if (error.code === "permission-denied") {
         alert(
-          "Failed to call next ticket because Firestore rules blocked the update. Please update your firestore.rules with the version I gave below."
+          "Failed to call next ticket because Firestore rules blocked the update."
         );
         return;
       }
@@ -375,6 +486,7 @@ function StaffDashboard() {
       }
 
       if (processingFinish) return;
+
       setProcessingFinish(true);
 
       const endTime = new Date();
@@ -394,15 +506,17 @@ function StaffDashboard() {
 
       await updateDoc(doc(db, "queue_tickets", currentServingTicket.id), {
         status: "Done",
-        completed_at: endTime
+        completed_at: serverTimestamp()
       });
 
       await addDoc(collection(db, "transactions"), {
         ticket_id: currentServingTicket.id,
+        ticket_number: currentServingTicket.ticket_number || "",
         dept_id: selectedDept.id,
+        dept_name: selectedDept.dept_name || selectedDeptName,
         lane_type: currentServingTicket.lane_type || "Regular",
         start_time: startDate || null,
-        end_time: endTime,
+        end_time: serverTimestamp(),
         duration_sec: durationSec,
         window_assignment: assignedWindow || "Window 1",
         served_by: currentUser?.uid || ""
@@ -416,7 +530,7 @@ function StaffDashboard() {
 
       if (error.code === "permission-denied") {
         alert(
-          "Failed to finish current ticket because Firestore rules blocked the update. Please update your firestore.rules with the version I gave below."
+          "Failed to finish current ticket because Firestore rules blocked the update."
         );
         return;
       }
@@ -435,10 +549,12 @@ function StaffDashboard() {
       }
 
       if (processingPause) return;
+
       setProcessingPause(true);
 
       await updateDoc(doc(db, "queue_tickets", currentServingTicket.id), {
-        status: "Paused"
+        status: "Paused",
+        paused_at: serverTimestamp()
       });
 
       await clearDepartmentServingDisplay(currentServingTicket);
@@ -449,7 +565,7 @@ function StaffDashboard() {
 
       if (error.code === "permission-denied") {
         alert(
-          "Failed to pause current ticket because Firestore rules blocked the update. Please update your firestore.rules with the version I gave below."
+          "Failed to pause current ticket because Firestore rules blocked the update."
         );
         return;
       }
@@ -472,10 +588,12 @@ function StaffDashboard() {
       }
 
       if (processingResume) return;
+
       setProcessingResume(true);
 
       await updateDoc(doc(db, "queue_tickets", ticket.id), {
         status: "Serving",
+        resumed_at: serverTimestamp(),
         window_assignment: assignedWindow || "Window 1",
         served_by: currentUser?.uid || ""
       });
@@ -488,7 +606,7 @@ function StaffDashboard() {
 
       if (error.code === "permission-denied") {
         alert(
-          "Failed to resume paused ticket because Firestore rules blocked the update. Please update your firestore.rules with the version I gave below."
+          "Failed to resume paused ticket because Firestore rules blocked the update."
         );
         return;
       }
@@ -605,7 +723,7 @@ function StaffDashboard() {
             type="button"
             className="qf-staff-primary-btn"
             onClick={handleCallNext}
-            disabled={processingNext}
+            disabled={processingNext || !selectedDept || !selectedDept.is_active}
           >
             {processingNext ? "Processing..." : "Call Next"}
           </button>
@@ -650,6 +768,7 @@ function StaffDashboard() {
                   <h3>{currentServingTicket.ticket_number}</h3>
                   <p>{currentServingTicket.lane_type || "Regular"} Lane</p>
                 </div>
+
                 <span className={getStatusClass(currentServingTicket.status)}>
                   {currentServingTicket.status}
                 </span>
@@ -701,6 +820,7 @@ function StaffDashboard() {
                       <h3>{ticket.ticket_number}</h3>
                       <p>{ticket.lane_type || "Regular"} Lane</p>
                     </div>
+
                     <span className={getStatusClass(ticket.status)}>
                       {ticket.status}
                     </span>
@@ -715,6 +835,16 @@ function StaffDashboard() {
                     <div className="qf-staff-meta-box">
                       <span>Student No</span>
                       <strong>{ticket.student_no}</strong>
+                    </div>
+
+                    <div className="qf-staff-meta-box">
+                      <span>Queue Position</span>
+                      <strong>{getQueuePositionLabel(ticket)}</strong>
+                    </div>
+
+                    <div className="qf-staff-meta-box">
+                      <span>Est. Wait</span>
+                      <strong>{getEstimatedWaitForTicket(ticket)}</strong>
                     </div>
                   </div>
 
@@ -749,9 +879,32 @@ function StaffDashboard() {
         </div>
       </div>
 
+      <div className="qf-staff-overview-strip">
+        <div>
+          <span>Active Queue</span>
+          <strong>{selectedDeptActiveCount}</strong>
+        </div>
+
+        <div>
+          <span>Total Records</span>
+          <strong>{selectedDeptTotalCount}</strong>
+        </div>
+
+        <div>
+          <span>Regular Waiting</span>
+          <strong>{pendingRegularTickets.length}</strong>
+        </div>
+
+        <div>
+          <span>Priority Waiting</span>
+          <strong>{pendingPriorityTickets.length}</strong>
+        </div>
+      </div>
+
       <div className="qf-staff-queue-group-grid">
         <div className="qf-staff-queue-column">
           <div className="qf-staff-section-title">Priority Queue</div>
+
           {pendingPriorityTickets.length === 0 ? (
             <div className="qf-staff-empty-box">
               No pending priority tickets.
@@ -765,6 +918,7 @@ function StaffDashboard() {
                       <h3>{ticket.ticket_number}</h3>
                       <p>{ticket.priority_type || "Priority"} Lane</p>
                     </div>
+
                     <span className={getStatusClass(ticket.status)}>
                       {ticket.status}
                     </span>
@@ -787,8 +941,18 @@ function StaffDashboard() {
                     </div>
 
                     <div className="qf-staff-meta-box">
-                      <span>Priority Status</span>
-                      <strong>{ticket.priority_status || "-"}</strong>
+                      <span>Queue Position</span>
+                      <strong>{getQueuePositionLabel(ticket)}</strong>
+                    </div>
+
+                    <div className="qf-staff-meta-box">
+                      <span>Est. Wait</span>
+                      <strong>{getEstimatedWaitForTicket(ticket)}</strong>
+                    </div>
+
+                    <div className="qf-staff-meta-box">
+                      <span>Created</span>
+                      <strong>{getReadableDateTime(ticket.created_at)}</strong>
                     </div>
                   </div>
                 </div>
@@ -799,6 +963,7 @@ function StaffDashboard() {
 
         <div className="qf-staff-queue-column">
           <div className="qf-staff-section-title">Regular Queue</div>
+
           {pendingRegularTickets.length === 0 ? (
             <div className="qf-staff-empty-box">No pending regular tickets.</div>
           ) : (
@@ -810,6 +975,7 @@ function StaffDashboard() {
                       <h3>{ticket.ticket_number}</h3>
                       <p>{ticket.lane_type || "Regular"} Lane</p>
                     </div>
+
                     <span className={getStatusClass(ticket.status)}>
                       {ticket.status}
                     </span>
@@ -832,8 +998,18 @@ function StaffDashboard() {
                     </div>
 
                     <div className="qf-staff-meta-box">
-                      <span>Priority Type</span>
-                      <strong>{ticket.priority_type || "Regular"}</strong>
+                      <span>Queue Position</span>
+                      <strong>{getQueuePositionLabel(ticket)}</strong>
+                    </div>
+
+                    <div className="qf-staff-meta-box">
+                      <span>Est. Wait</span>
+                      <strong>{getEstimatedWaitForTicket(ticket)}</strong>
+                    </div>
+
+                    <div className="qf-staff-meta-box">
+                      <span>Created</span>
+                      <strong>{getReadableDateTime(ticket.created_at)}</strong>
                     </div>
                   </div>
                 </div>
@@ -865,6 +1041,7 @@ function StaffDashboard() {
                   <h3>{ticket.ticket_number}</h3>
                   <p>{ticket.lane_type || "Regular"} Lane</p>
                 </div>
+
                 <span className={getStatusClass(ticket.status)}>
                   {ticket.status}
                 </span>
@@ -877,14 +1054,8 @@ function StaffDashboard() {
                 </div>
 
                 <div className="qf-staff-meta-box">
-                  <span>Completed At</span>
-                  <strong>
-                    {ticket.completed_at?.toDate
-                      ? ticket.completed_at.toDate().toLocaleString()
-                      : ticket.completed_at?.seconds
-                      ? new Date(ticket.completed_at.seconds * 1000).toLocaleString()
-                      : "-"}
-                  </strong>
+                  <span>Student No</span>
+                  <strong>{ticket.student_no}</strong>
                 </div>
 
                 <div className="qf-staff-meta-box">
@@ -895,6 +1066,16 @@ function StaffDashboard() {
                 <div className="qf-staff-meta-box">
                   <span>Priority Type</span>
                   <strong>{ticket.priority_type || "Regular"}</strong>
+                </div>
+
+                <div className="qf-staff-meta-box">
+                  <span>Completed At</span>
+                  <strong>{getReadableDateTime(ticket.completed_at)}</strong>
+                </div>
+
+                <div className="qf-staff-meta-box">
+                  <span>Status</span>
+                  <strong>{ticket.status || "-"}</strong>
                 </div>
               </div>
             </div>
@@ -908,6 +1089,7 @@ function StaffDashboard() {
     if (activeSection === "overview") return renderOverviewSection();
     if (activeSection === "queue") return renderQueueSection();
     if (activeSection === "completed") return renderCompletedSection();
+
     return renderOverviewSection();
   };
 
@@ -929,6 +1111,7 @@ function StaffDashboard() {
       <aside className={`qf-staff-drawer ${sidebarOpen ? "open" : ""}`}>
         <div className="qf-staff-drawer-top">
           <div className="qf-staff-drawer-brand">QueueFree</div>
+
           <button
             className="qf-staff-drawer-close"
             onClick={() => setSidebarOpen(false)}
@@ -943,6 +1126,7 @@ function StaffDashboard() {
           <div className="qf-staff-avatar">
             {String(staffDisplayName).charAt(0).toUpperCase()}
           </div>
+
           <div>
             <strong>{staffDisplayName}</strong>
             <p>{assignedOffice || "Queue Operations"}</p>
@@ -954,7 +1138,9 @@ function StaffDashboard() {
             <button
               key={item.key}
               type="button"
-              className={`qf-staff-drawer-link ${activeSection === item.key ? "active" : ""}`}
+              className={`qf-staff-drawer-link ${
+                activeSection === item.key ? "active" : ""
+              }`}
               onClick={() => {
                 setActiveSection(item.key);
                 setSidebarOpen(false);
