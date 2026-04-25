@@ -54,6 +54,87 @@ function AdminDashboard() {
     currentUser?.email?.split("@")[0] ||
     "Admin";
 
+  function getReadableDateTime(value) {
+    if (value?.toDate) {
+      return value.toDate().toLocaleString();
+    }
+
+    if (value?.seconds) {
+      return new Date(value.seconds * 1000).toLocaleString();
+    }
+
+    if (value instanceof Date) {
+      return value.toLocaleString();
+    }
+
+    return "-";
+  }
+
+  function getProofType(proofData = "") {
+    if (!proofData || typeof proofData !== "string") return "none";
+    if (proofData.startsWith("data:image")) return "image";
+    if (proofData.startsWith("data:application/pdf")) return "pdf";
+    return "unknown";
+  }
+
+  function getDepartmentNameById(deptId) {
+    const found = departments.find((dept) => dept.id === deptId);
+    return found?.dept_name || "-";
+  }
+
+  function getUserById(userId) {
+    return users.find((user) => user.id === userId) || null;
+  }
+
+  function getFullName(user) {
+    if (!user) return "Unknown User";
+
+    return (
+      `${user.first_name || ""} ${user.last_name || ""}`.trim() ||
+      user.email ||
+      "Unknown User"
+    );
+  }
+
+  function getStatusClass(status) {
+    if (status === "Serving") return "qf-admin-status qf-admin-status-serving";
+    if (status === "Done") return "qf-admin-status qf-admin-status-done";
+    if (status === "Paused") return "qf-admin-status qf-admin-status-paused";
+    return "qf-admin-status qf-admin-status-pending";
+  }
+
+  function downloadCsv(filename, rows) {
+    if (!rows || rows.length === 0) {
+      alert("No records available to export.");
+      return;
+    }
+
+    const headers = Object.keys(rows[0]);
+
+    const escapeCsv = (value) => {
+      const text = value === null || value === undefined ? "" : String(value);
+      return `"${text.replace(/"/g, '""')}"`;
+    };
+
+    const csvContent = [
+      headers.map(escapeCsv).join(","),
+      ...rows.map((row) => headers.map((header) => escapeCsv(row[header])).join(","))
+    ].join("\n");
+
+    const blob = new Blob([csvContent], {
+      type: "text/csv;charset=utf-8;"
+    });
+
+    const url = URL.createObjectURL(blob);
+    const link = document.createElement("a");
+
+    link.href = url;
+    link.download = filename;
+    link.click();
+
+    URL.revokeObjectURL(url);
+  }
+
   useEffect(() => {
     const unsubDepartments = onSnapshot(
       collection(db, "departments"),
@@ -81,6 +162,7 @@ function AdminDashboard() {
           id: docSnap.id,
           ...docSnap.data()
         }));
+
         setTickets(data);
       },
       (error) => {
@@ -95,6 +177,7 @@ function AdminDashboard() {
           id: docSnap.id,
           ...docSnap.data()
         }));
+
         setTransactions(data);
       },
       (error) => {
@@ -121,6 +204,7 @@ function AdminDashboard() {
 
         snapshot.docs.forEach((docSnap) => {
           const userData = docSnap.data();
+
           officeMap[docSnap.id] = userData.office_assignment || "";
           windowMap[docSnap.id] = userData.window_assignment || "Window 1";
         });
@@ -146,14 +230,24 @@ function AdminDashboard() {
   }, [departments, selectedDeptName]);
 
   const totalTickets = tickets.length;
-  const totalRequests = tickets.filter((ticket) => ticket.status !== "Done").length;
+
+  const totalRequests = tickets.filter(
+    (ticket) =>
+      ticket.status !== "Done" &&
+      ticket.status !== "Cancelled" &&
+      ticket.status !== "Reset"
+  ).length;
+
   const totalServed = tickets.filter((ticket) => ticket.status === "Done").length;
   const totalPending = tickets.filter((ticket) => ticket.status === "Pending").length;
   const totalServing = tickets.filter((ticket) => ticket.status === "Serving").length;
+  const totalPaused = tickets.filter((ticket) => ticket.status === "Paused").length;
   const totalDone = tickets.filter((ticket) => ticket.status === "Done").length;
+
   const totalPriority = tickets.filter(
     (ticket) => (ticket.lane_type || "Regular") === "Priority"
   ).length;
+
   const totalRegular = tickets.filter(
     (ticket) => (ticket.lane_type || "Regular") !== "Priority"
   ).length;
@@ -211,19 +305,23 @@ function AdminDashboard() {
 
   const avgWaitTime = useMemo(() => {
     if (departments.length === 0) return 0;
+
     const total = departments.reduce(
       (sum, dept) => sum + Number(dept.avg_service_time || 0),
       0
     );
+
     return Math.round(total / departments.length);
   }, [departments]);
 
   const avgServiceSeconds = useMemo(() => {
     if (transactions.length === 0) return 0;
+
     const totalSeconds = transactions.reduce(
       (sum, item) => sum + Number(item.duration_sec || 0),
       0
     );
+
     return Math.round(totalSeconds / transactions.length);
   }, [transactions]);
 
@@ -235,7 +333,12 @@ function AdminDashboard() {
       serving: deptTickets.filter((ticket) => ticket.status === "Serving").length,
       paused: deptTickets.filter((ticket) => ticket.status === "Paused").length,
       done: deptTickets.filter((ticket) => ticket.status === "Done").length,
-      active: deptTickets.filter((ticket) => ticket.status !== "Done").length,
+      active: deptTickets.filter(
+        (ticket) =>
+          ticket.status !== "Done" &&
+          ticket.status !== "Cancelled" &&
+          ticket.status !== "Reset"
+      ).length,
       regular: deptTickets.filter(
         (ticket) => (ticket.lane_type || "Regular") !== "Priority"
       ).length,
@@ -265,6 +368,30 @@ function AdminDashboard() {
       })
       .slice(0, 10);
   }, [transactions]);
+
+  const userActivityLogs = useMemo(() => {
+    return [...tickets]
+      .sort((a, b) => {
+        const aTime = a.created_at?.seconds || 0;
+        const bTime = b.created_at?.seconds || 0;
+        return bTime - aTime;
+      })
+      .slice(0, 12)
+      .map((ticket) => {
+        const linkedUser = getUserById(ticket.user_id);
+
+        return {
+          id: ticket.id,
+          userName: getFullName(linkedUser),
+          email: linkedUser?.email || "-",
+          action: `Generated ${ticket.lane_type || "Regular"} queue ticket`,
+          ticketNumber: ticket.ticket_number || "-",
+          department: ticket.dept_name || getDepartmentNameById(ticket.dept_id),
+          status: ticket.status || "Pending",
+          createdAt: getReadableDateTime(ticket.created_at)
+        };
+      });
+  }, [tickets, users, departments]);
 
   const hourlyBuckets = useMemo(() => {
     const buckets = {
@@ -322,12 +449,15 @@ function AdminDashboard() {
 
   const peakInsight = useMemo(() => {
     const sorted = [...peakHourData].sort((a, b) => b.value - a.value);
-    if (!sorted.length) return "No queue data yet.";
+
+    if (!sorted.length) {
+      return "No queue data yet.";
+    }
 
     const top = sorted[0];
 
     if (top.value === 0) {
-      return "No peak queue hour detected yet. The system will update this once users start joining queues.";
+      return "No peak queue hour detected yet. The system will update once users start joining queues.";
     }
 
     return `${top.label} currently has the highest queue activity with ${top.value} ticket${
@@ -338,65 +468,94 @@ function AdminDashboard() {
   const reportsData = useMemo(() => {
     return [
       {
-        title: "Daily Queue Report",
-        subtitle: "Today overview",
-        value: `${totalDone} completed queues`,
-        note: "Based on finished queue tickets today."
-      },
-      {
-        title: "Weekly Queue Summary",
-        subtitle: "All lanes",
+        title: "Summary Report",
+        subtitle: "Live database summary",
         value: `${totalTickets} total tickets`,
-        note: "Combined regular and priority queue activity."
+        note: `${totalPending} pending, ${totalServing} serving, ${totalPaused} paused, and ${totalDone} completed.`
       },
       {
-        title: "Monthly Performance",
-        subtitle: "System output",
-        value: `${transactions.length} total transactions`,
-        note: `Average service duration: ${avgServiceSeconds}s`
+        title: "Transaction History",
+        subtitle: "Completed service records",
+        value: `${transactions.length} transactions`,
+        note: `Average service duration is ${avgServiceSeconds}s based on completed transaction records.`
       },
       {
-        title: "Queue Service Time",
-        subtitle: "Current average",
-        value: `${avgServiceSeconds}s average`,
-        note: "Estimated from current completed queue transaction records."
+        title: "User Activity Logs",
+        subtitle: "Recent queue actions",
+        value: `${userActivityLogs.length} recent activities`,
+        note: "Generated from live queue ticket records and linked user accounts."
+      },
+      {
+        title: "Priority Lane Report",
+        subtitle: "Priority usage overview",
+        value: `${totalPriority} priority tickets`,
+        note: `${approvedPriorityUsers.length} approved priority users, ${pendingPriorityUsers.length} pending requests, and ${rejectedPriorityUsers.length} rejected requests.`
       }
     ];
-  }, [totalDone, totalTickets, transactions.length, avgServiceSeconds]);
+  }, [
+    totalTickets,
+    totalPending,
+    totalServing,
+    totalPaused,
+    totalDone,
+    transactions.length,
+    avgServiceSeconds,
+    userActivityLogs.length,
+    totalPriority,
+    approvedPriorityUsers.length,
+    pendingPriorityUsers.length,
+    rejectedPriorityUsers.length
+  ]);
 
-  const getStatusClass = (status) => {
-    if (status === "Serving") return "qf-admin-status qf-admin-status-serving";
-    if (status === "Done") return "qf-admin-status qf-admin-status-done";
-    if (status === "Paused") return "qf-admin-status qf-admin-status-paused";
-    return "qf-admin-status qf-admin-status-pending";
+  const handleExportSummaryCsv = () => {
+    const rows = departments.map((dept) => {
+      const counts = getDepartmentCounts(dept.id);
+
+      return {
+        Department: dept.dept_name || "-",
+        Active: counts.active,
+        Pending: counts.pending,
+        Serving: counts.serving,
+        Paused: counts.paused,
+        Done: counts.done,
+        Regular: counts.regular,
+        Priority: counts.priority,
+        Total: counts.total,
+        RegularNowServing: dept.regular_now_serving_display || "-",
+        PriorityNowServing: dept.priority_now_serving_display || "-"
+      };
+    });
+
+    downloadCsv("queuefree-summary-report.csv", rows);
   };
 
-  const getReadableDateTime = (value) => {
-    if (value?.toDate) {
-      return value.toDate().toLocaleString();
-    }
+  const handleExportTransactionsCsv = () => {
+    const rows = transactions.map((item) => ({
+      TicketId: item.ticket_id || "-",
+      TicketNumber: item.ticket_number || "-",
+      Department: item.dept_name || getDepartmentNameById(item.dept_id),
+      Lane: item.lane_type || "Regular",
+      Window: item.window_assignment || "-",
+      ServedBy: item.served_by || "-",
+      DurationSeconds: item.duration_sec || 0,
+      EndTime: getReadableDateTime(item.end_time)
+    }));
 
-    if (value?.seconds) {
-      return new Date(value.seconds * 1000).toLocaleString();
-    }
-
-    return "-";
+    downloadCsv("queuefree-transaction-history.csv", rows);
   };
 
-  const getProofType = (proofData = "") => {
-    if (!proofData || typeof proofData !== "string") return "none";
-    if (proofData.startsWith("data:image")) return "image";
-    if (proofData.startsWith("data:application/pdf")) return "pdf";
-    return "unknown";
-  };
+  const handleExportUserActivityCsv = () => {
+    const rows = userActivityLogs.map((item) => ({
+      UserName: item.userName,
+      Email: item.email,
+      Action: item.action,
+      TicketNumber: item.ticketNumber,
+      Department: item.department,
+      Status: item.status,
+      CreatedAt: item.createdAt
+    }));
 
-  const getDepartmentNameById = (deptId) => {
-    const found = departments.find((dept) => dept.id === deptId);
-    return found?.dept_name || "-";
-  };
-
-  const getUserById = (userId) => {
-    return users.find((user) => user.id === userId) || null;
+    downloadCsv("queuefree-user-activity-logs.csv", rows);
   };
 
   const handleToggleDepartmentStatus = async () => {
@@ -465,7 +624,11 @@ function AdminDashboard() {
       ticketSnapshot.docs.forEach((ticketDoc) => {
         const ticketData = ticketDoc.data();
 
-        if (ticketData.status !== "Done") {
+        if (
+          ticketData.status !== "Done" &&
+          ticketData.status !== "Cancelled" &&
+          ticketData.status !== "Reset"
+        ) {
           batch.update(ticketDoc.ref, {
             status: "Done",
             reset_by_admin: true,
@@ -496,6 +659,7 @@ function AdminDashboard() {
         await updateDoc(doc(db, "users", userId), {
           priority_status: "approved"
         });
+
         alert("Priority request approved.");
       }
 
@@ -503,6 +667,7 @@ function AdminDashboard() {
         await updateDoc(doc(db, "users", userId), {
           priority_status: "rejected"
         });
+
         alert("Priority request rejected.");
       }
 
@@ -510,6 +675,7 @@ function AdminDashboard() {
         await updateDoc(doc(db, "users", userId), {
           priority_status: "pending"
         });
+
         alert("Priority request moved back to pending.");
       }
     } catch (error) {
@@ -750,14 +916,17 @@ function AdminDashboard() {
         <span>Total Queues</span>
         <strong>{totalTickets}</strong>
       </div>
+
       <div className="qf-admin-top-stat">
         <span>Active Queues</span>
         <strong>{totalRequests}</strong>
       </div>
+
       <div className="qf-admin-top-stat">
         <span>Avg. Wait Time</span>
         <strong>{avgWaitTime} min</strong>
       </div>
+
       <div className="qf-admin-top-stat">
         <span>Daily Served</span>
         <strong>{totalServed}</strong>
@@ -811,11 +980,6 @@ function AdminDashboard() {
           </button>
         </div>
 
-        <div className="qf-admin-reset-note">
-          Reset Queue clears active tickets for the selected office, clears now serving,
-          and restarts new queue numbers from 1.
-        </div>
-
         <div className="qf-admin-offices-list">
           {departments.map((dept) => {
             const counts = getDepartmentCounts(dept.id);
@@ -824,6 +988,7 @@ function AdminDashboard() {
               <div key={dept.id} className="qf-admin-office-row">
                 <div className="qf-admin-office-left">
                   <h3>{dept.dept_name}</h3>
+
                   <span
                     className={
                       dept.is_active
@@ -903,22 +1068,27 @@ function AdminDashboard() {
             <span>Pending</span>
             <strong>{totalPending}</strong>
           </div>
+
           <div className="qf-admin-analytics-chip">
             <span>Serving</span>
             <strong>{totalServing}</strong>
           </div>
+
+          <div className="qf-admin-analytics-chip">
+            <span>Paused</span>
+            <strong>{totalPaused}</strong>
+          </div>
+
           <div className="qf-admin-analytics-chip">
             <span>Done</span>
             <strong>{totalDone}</strong>
           </div>
+
           <div className="qf-admin-analytics-chip">
             <span>Priority</span>
             <strong>{totalPriority}</strong>
           </div>
-          <div className="qf-admin-analytics-chip">
-            <span>Regular</span>
-            <strong>{totalRegular}</strong>
-          </div>
+
           <div className="qf-admin-analytics-chip">
             <span>Avg Service</span>
             <strong>{avgServiceSeconds}s</strong>
@@ -935,12 +1105,14 @@ function AdminDashboard() {
             {peakHourData.map((item) => (
               <div key={item.label} className="qf-admin-bar-row">
                 <div className="qf-admin-bar-label">{item.label}</div>
+
                 <div className="qf-admin-bar-track">
                   <div
                     className="qf-admin-bar-fill"
                     style={{ width: `${item.widthPercent}%` }}
                   ></div>
                 </div>
+
                 <div className="qf-admin-bar-value">{item.value}</div>
               </div>
             ))}
@@ -960,7 +1132,10 @@ function AdminDashboard() {
       <div className="qf-admin-section-card">
         <div className="qf-admin-section-headline">
           <h2>Reports</h2>
-          <p>Summary records and printable management reports.</p>
+          <p>
+            Dynamic system-generated reports from Firestore including summary reports,
+            transaction history, and user activity logs.
+          </p>
         </div>
 
         <div className="qf-admin-reports-list">
@@ -973,12 +1148,96 @@ function AdminDashboard() {
                 <small>{report.note}</small>
               </div>
 
-              <button type="button" className="qf-admin-report-btn">
-                View Report
-              </button>
+              {report.title === "Summary Report" && (
+                <button
+                  type="button"
+                  className="qf-admin-report-btn"
+                  onClick={handleExportSummaryCsv}
+                >
+                  Export CSV
+                </button>
+              )}
+
+              {report.title === "Transaction History" && (
+                <button
+                  type="button"
+                  className="qf-admin-report-btn"
+                  onClick={handleExportTransactionsCsv}
+                >
+                  Export CSV
+                </button>
+              )}
+
+              {report.title === "User Activity Logs" && (
+                <button
+                  type="button"
+                  className="qf-admin-report-btn"
+                  onClick={handleExportUserActivityCsv}
+                >
+                  Export CSV
+                </button>
+              )}
+
+              {report.title === "Priority Lane Report" && (
+                <button
+                  type="button"
+                  className="qf-admin-report-btn"
+                  onClick={handleExportSummaryCsv}
+                >
+                  Export CSV
+                </button>
+              )}
             </div>
           ))}
         </div>
+      </div>
+
+      <div className="qf-admin-section-card">
+        <div className="qf-admin-section-headline">
+          <h2>User Activity Logs</h2>
+          <p>Recent user queue activities generated from the database.</p>
+        </div>
+
+        {userActivityLogs.length === 0 ? (
+          <div className="qf-admin-empty-state">No user activity logs yet.</div>
+        ) : (
+          <div className="qf-admin-record-grid">
+            {userActivityLogs.map((log) => (
+              <div key={log.id} className="qf-admin-record-card">
+                <div className="qf-admin-record-top">
+                  <div className="qf-admin-record-title-wrap">
+                    <h3>{log.userName}</h3>
+                    <p>{log.email}</p>
+                  </div>
+
+                  <span className={getStatusClass(log.status)}>{log.status}</span>
+                </div>
+
+                <div className="qf-admin-record-meta">
+                  <div className="qf-admin-info-box">
+                    <span>Action</span>
+                    <strong>{log.action}</strong>
+                  </div>
+
+                  <div className="qf-admin-info-box">
+                    <span>Ticket</span>
+                    <strong>{log.ticketNumber}</strong>
+                  </div>
+
+                  <div className="qf-admin-info-box">
+                    <span>Office</span>
+                    <strong>{log.department}</strong>
+                  </div>
+
+                  <div className="qf-admin-info-box">
+                    <span>Created</span>
+                    <strong>{log.createdAt}</strong>
+                  </div>
+                </div>
+              </div>
+            ))}
+          </div>
+        )}
       </div>
     </div>
   );
@@ -1014,20 +1273,14 @@ function AdminDashboard() {
                   <div className="qf-admin-record-meta">
                     <div className="qf-admin-info-box">
                       <span>Office</span>
-                      <strong>{ticket.dept_name || getDepartmentNameById(ticket.dept_id)}</strong>
+                      <strong>
+                        {ticket.dept_name || getDepartmentNameById(ticket.dept_id)}
+                      </strong>
                     </div>
 
                     <div className="qf-admin-info-box">
                       <span>User</span>
-                      <strong>
-                        {linkedUser
-                          ? `${linkedUser.first_name || ""} ${
-                              linkedUser.last_name || ""
-                            }`.trim() ||
-                            linkedUser.email ||
-                            "-"
-                          : ticket.user_id || "-"}
-                      </strong>
+                      <strong>{getFullName(linkedUser)}</strong>
                     </div>
 
                     <div className="qf-admin-info-box">
@@ -1065,7 +1318,9 @@ function AdminDashboard() {
               <div key={item.id} className="qf-admin-record-card">
                 <div className="qf-admin-record-top">
                   <div className="qf-admin-record-title-wrap">
-                    <h3 className="qf-admin-break-text">{item.ticket_id || "-"}</h3>
+                    <h3 className="qf-admin-break-text">
+                      {item.ticket_number || item.ticket_id || "-"}
+                    </h3>
                     <p>{item.lane_type || "Regular"} Lane</p>
                   </div>
 
@@ -1077,7 +1332,7 @@ function AdminDashboard() {
                 <div className="qf-admin-record-meta">
                   <div className="qf-admin-info-box">
                     <span>Department</span>
-                    <strong>{getDepartmentNameById(item.dept_id)}</strong>
+                    <strong>{item.dept_name || getDepartmentNameById(item.dept_id)}</strong>
                   </div>
 
                   <div className="qf-admin-info-box">
@@ -1118,10 +1373,12 @@ function AdminDashboard() {
             <span>All Users</span>
             <strong>{userAccounts.length}</strong>
           </div>
+
           <div className="qf-admin-analytics-chip">
             <span>Active Users</span>
             <strong>{activeUserAccounts.length}</strong>
           </div>
+
           <div className="qf-admin-analytics-chip">
             <span>Archived Users</span>
             <strong>{archivedUserAccounts.length}</strong>
@@ -1137,10 +1394,7 @@ function AdminDashboard() {
                 </div>
 
                 <div className="qf-admin-user-main">
-                  <h3>
-                    {`${user.first_name || ""} ${user.last_name || ""}`.trim() ||
-                      "Unnamed User"}
-                  </h3>
+                  <h3>{getFullName(user)}</h3>
                   <p>{user.email || "-"}</p>
                 </div>
               </div>
@@ -1205,13 +1459,7 @@ function AdminDashboard() {
           <div className="qf-admin-proof-modal-top">
             <div>
               <h3>Priority Proof Preview</h3>
-              <p>
-                {`${proofPreviewUser.first_name || ""} ${
-                  proofPreviewUser.last_name || ""
-                }`.trim() ||
-                  proofPreviewUser.email ||
-                  "User"}
-              </p>
+              <p>{getFullName(proofPreviewUser)}</p>
             </div>
 
             <button
@@ -1298,10 +1546,12 @@ function AdminDashboard() {
             <span>Pending</span>
             <strong>{pendingPriorityUsers.length}</strong>
           </div>
+
           <div className="qf-admin-analytics-chip">
             <span>Approved</span>
             <strong>{approvedPriorityUsers.length}</strong>
           </div>
+
           <div className="qf-admin-analytics-chip">
             <span>Rejected</span>
             <strong>{rejectedPriorityUsers.length}</strong>
@@ -1316,16 +1566,11 @@ function AdminDashboard() {
               <div key={user.id} className="qf-admin-priority-card">
                 <div className="qf-admin-priority-head">
                   <div>
-                    <h3>
-                      {`${user.first_name || ""} ${user.last_name || ""}`.trim() ||
-                        "Unnamed User"}
-                    </h3>
+                    <h3>{getFullName(user)}</h3>
                     <p>{user.email || "-"}</p>
                   </div>
 
-                  <span className="qf-admin-office-status active">
-                    Pending
-                  </span>
+                  <span className="qf-admin-office-status active">Pending</span>
                 </div>
 
                 <div className="qf-admin-user-meta-grid">
@@ -1413,10 +1658,7 @@ function AdminDashboard() {
                 </div>
 
                 <div className="qf-admin-user-main">
-                  <h3>
-                    {`${user.first_name || ""} ${user.last_name || ""}`.trim() ||
-                      "Unnamed User"}
-                  </h3>
+                  <h3>{getFullName(user)}</h3>
                   <p>{user.email || "-"}</p>
                 </div>
               </div>
@@ -1493,10 +1735,12 @@ function AdminDashboard() {
             <span>All Staff</span>
             <strong>{staffAccounts.length}</strong>
           </div>
+
           <div className="qf-admin-analytics-chip">
             <span>Active Staff</span>
             <strong>{activeStaffAccounts.length}</strong>
           </div>
+
           <div className="qf-admin-analytics-chip">
             <span>Archived Staff</span>
             <strong>{archivedStaffAccounts.length}</strong>
@@ -1654,11 +1898,7 @@ function AdminDashboard() {
                   </div>
 
                   <div className="qf-admin-user-main">
-                    <h3>
-                      {`${staffUser.first_name || ""} ${
-                        staffUser.last_name || ""
-                      }`.trim() || "Unnamed Staff"}
-                    </h3>
+                    <h3>{getFullName(staffUser)}</h3>
                     <p>{staffUser.email || "-"}</p>
                   </div>
                 </div>
@@ -1668,6 +1908,7 @@ function AdminDashboard() {
                     <label htmlFor={`staff-office-${staffUser.id}`}>
                       Office Assignment
                     </label>
+
                     <select
                       id={`staff-office-${staffUser.id}`}
                       name={`staff-office-${staffUser.id}`}
@@ -1693,6 +1934,7 @@ function AdminDashboard() {
                     <label htmlFor={`staff-window-${staffUser.id}`}>
                       Window Assignment
                     </label>
+
                     <select
                       id={`staff-window-${staffUser.id}`}
                       name={`staff-window-${staffUser.id}`}
@@ -1790,6 +2032,7 @@ function AdminDashboard() {
     if (activeSection === "users") return renderUsersSection();
     if (activeSection === "priority") return renderPrioritySection();
     if (activeSection === "staff") return renderStaffSection();
+
     return renderOfficesSection();
   };
 
@@ -1831,6 +2074,7 @@ function AdminDashboard() {
       <aside className={`qf-admin-drawer ${sidebarOpen ? "open" : ""}`}>
         <div className="qf-admin-drawer-top">
           <div className="qf-admin-drawer-brand">QueueFree</div>
+
           <button
             className="qf-admin-drawer-close"
             onClick={() => setSidebarOpen(false)}
@@ -1845,6 +2089,7 @@ function AdminDashboard() {
           <div className="qf-admin-avatar">
             {String(displayName).charAt(0).toUpperCase()}
           </div>
+
           <div>
             <strong>{displayName}</strong>
             <p>{currentUser?.email || "admin@queuefree"}</p>

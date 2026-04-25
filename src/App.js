@@ -1,5 +1,11 @@
 import React from "react";
-import { BrowserRouter as Router, Routes, Route, NavLink, Navigate } from "react-router-dom";
+import {
+  BrowserRouter as Router,
+  Routes,
+  Route,
+  NavLink,
+  Navigate
+} from "react-router-dom";
 import { AuthProvider, useAuth } from "./AuthContext";
 import ProtectedRoute from "./ProtectedRoute";
 import Login from "./Login";
@@ -13,119 +19,206 @@ function AppShell() {
 
   const navStyle = ({ isActive }) => ({
     textDecoration: "none",
-    padding: "12px 18px",
-    borderRadius: "14px",
-    fontWeight: "700",
-    fontSize: "14px",
+    padding: "10px 15px",
+    borderRadius: "13px",
+    fontWeight: "800",
+    fontSize: "13px",
     color: isActive ? "#ffffff" : "#cbd5e1",
     background: isActive
       ? "linear-gradient(135deg, #2563eb, #1d4ed8)"
       : "rgba(255,255,255,0.05)",
     border: isActive
-      ? "1px solid rgba(96,165,250,0.25)"
+      ? "1px solid rgba(96,165,250,0.28)"
       : "1px solid rgba(255,255,255,0.08)",
     boxShadow: isActive ? "0 10px 20px rgba(37,99,235,0.22)" : "none",
-    backdropFilter: "blur(8px)"
+    backdropFilter: "blur(8px)",
+    whiteSpace: "nowrap"
   });
+
+  const shellStyles = `
+    .qf-shell-root {
+      min-height: 100vh;
+      width: 100%;
+      margin: 0;
+      padding: 0;
+      background:
+        radial-gradient(circle at top left, rgba(37,99,235,0.16), transparent 20%),
+        radial-gradient(circle at bottom right, rgba(13,148,136,0.14), transparent 18%),
+        linear-gradient(180deg, #08111f 0%, #0b1220 45%, #111827 100%);
+      font-family: Inter, Arial, sans-serif;
+      box-sizing: border-box;
+      overflow-x: hidden;
+    }
+
+    .qf-shell-header {
+      width: 100%;
+      background: rgba(15, 23, 42, 0.78);
+      border-bottom: 1px solid rgba(148,163,184,0.12);
+      box-shadow: 0 14px 34px rgba(0,0,0,0.18);
+      backdrop-filter: blur(14px);
+      box-sizing: border-box;
+      position: relative;
+      z-index: 100;
+    }
+
+    .qf-shell-header-inner {
+      width: 100%;
+      padding: 18px 24px;
+      box-sizing: border-box;
+    }
+
+    .qf-shell-header-row {
+      display: flex;
+      justify-content: space-between;
+      align-items: center;
+      gap: 18px;
+      flex-wrap: wrap;
+    }
+
+    .qf-shell-brand-block {
+      min-width: 0;
+    }
+
+    .qf-shell-mini {
+      margin: 0;
+      font-size: 11px;
+      letter-spacing: 0.08em;
+      color: #93c5fd;
+      text-transform: uppercase;
+      font-weight: 900;
+    }
+
+    .qf-shell-title {
+      margin: 6px 0 0 0;
+      font-size: 28px;
+      color: #ffffff;
+      font-weight: 900;
+      line-height: 1.1;
+      word-break: break-word;
+    }
+
+    .qf-shell-nav {
+      display: flex;
+      gap: 10px;
+      flex-wrap: wrap;
+      align-items: center;
+      justify-content: flex-end;
+    }
+
+    .qf-shell-role-chip {
+      padding: 10px 14px;
+      border-radius: 13px;
+      background: rgba(255,255,255,0.05);
+      border: 1px solid rgba(255,255,255,0.08);
+      color: #cbd5e1;
+      font-size: 13px;
+      font-weight: 800;
+      white-space: nowrap;
+    }
+
+    .qf-shell-logout-btn {
+      padding: 10px 15px;
+      border-radius: 13px;
+      border: 1px solid rgba(239,68,68,0.25);
+      background: rgba(239,68,68,0.14);
+      color: #fecaca;
+      font-weight: 800;
+      font-size: 13px;
+      cursor: pointer;
+      white-space: nowrap;
+    }
+
+    .qf-shell-content {
+      width: 100%;
+      padding: 14px;
+      box-sizing: border-box;
+    }
+
+    .qf-shell-loading {
+      min-height: 100vh;
+      width: 100%;
+      margin: 0;
+      padding: 0;
+      display: flex;
+      justify-content: center;
+      align-items: center;
+      background:
+        radial-gradient(circle at top left, rgba(37,99,235,0.16), transparent 20%),
+        radial-gradient(circle at bottom right, rgba(13,148,136,0.14), transparent 18%),
+        linear-gradient(180deg, #08111f 0%, #0b1220 45%, #111827 100%);
+      color: #ffffff;
+      font-family: Inter, Arial, sans-serif;
+      font-size: 18px;
+      font-weight: 800;
+      box-sizing: border-box;
+    }
+
+    @media (max-width: 768px) {
+      .qf-shell-header-inner {
+        padding: 14px 14px;
+      }
+
+      .qf-shell-header-row {
+        align-items: flex-start;
+      }
+
+      .qf-shell-title {
+        font-size: 22px;
+      }
+
+      .qf-shell-nav {
+        width: 100%;
+        justify-content: flex-start;
+      }
+
+      .qf-shell-content {
+        padding: 10px;
+      }
+    }
+
+    @media (max-width: 480px) {
+      .qf-shell-title {
+        font-size: 19px;
+      }
+
+      .qf-shell-nav {
+        gap: 8px;
+      }
+
+      .qf-shell-role-chip,
+      .qf-shell-logout-btn {
+        font-size: 12px;
+        padding: 9px 12px;
+      }
+    }
+  `;
 
   if (authLoading) {
     return (
-      <div
-        style={{
-          minHeight: "100vh",
-          width: "100%",
-          margin: 0,
-          padding: 0,
-          display: "flex",
-          justifyContent: "center",
-          alignItems: "center",
-          background:
-            "radial-gradient(circle at top left, rgba(37,99,235,0.16), transparent 20%), radial-gradient(circle at bottom right, rgba(13,148,136,0.14), transparent 18%), linear-gradient(180deg, #08111f 0%, #0b1220 45%, #111827 100%)",
-          color: "#ffffff",
-          fontFamily: "Inter, Arial, sans-serif",
-          fontSize: "18px",
-          fontWeight: "700"
-        }}
-      >
-        Loading...
-      </div>
+      <>
+        <style>{shellStyles}</style>
+        <div className="qf-shell-loading">Loading...</div>
+      </>
     );
   }
 
   return (
     <Router>
-      <div
-        style={{
-          minHeight: "100vh",
-          width: "100%",
-          margin: 0,
-          padding: 0,
-          background:
-            "radial-gradient(circle at top left, rgba(37,99,235,0.16), transparent 20%), radial-gradient(circle at bottom right, rgba(13,148,136,0.14), transparent 18%), linear-gradient(180deg, #08111f 0%, #0b1220 45%, #111827 100%)",
-          fontFamily: "Inter, Arial, sans-serif",
-          boxSizing: "border-box",
-          overflowX: "hidden"
-        }}
-      >
-        <div
-          style={{
-            width: "100%",
-            background: "rgba(15, 23, 42, 0.72)",
-            borderBottom: "1px solid rgba(148,163,184,0.12)",
-            boxShadow: "0 18px 36px rgba(0,0,0,0.18)",
-            backdropFilter: "blur(14px)",
-            boxSizing: "border-box"
-          }}
-        >
-          <div
-            style={{
-              width: "100%",
-              padding: "22px 26px",
-              boxSizing: "border-box"
-            }}
-          >
-            <div
-              style={{
-                display: "flex",
-                justifyContent: "space-between",
-                alignItems: "center",
-                gap: "20px",
-                flexWrap: "wrap"
-              }}
-            >
-              <div>
-                <p
-                  style={{
-                    margin: 0,
-                    fontSize: "12px",
-                    letterSpacing: "0.08em",
-                    color: "#93c5fd",
-                    textTransform: "uppercase"
-                  }}
-                >
-                  QueueFree • UCLM
-                </p>
-                <h1
-                  style={{
-                    margin: "8px 0 0 0",
-                    fontSize: "30px",
-                    color: "#ffffff",
-                    fontWeight: "800"
-                  }}
-                >
+      <style>{shellStyles}</style>
+
+      <div className="qf-shell-root">
+        <header className="qf-shell-header">
+          <div className="qf-shell-header-inner">
+            <div className="qf-shell-header-row">
+              <div className="qf-shell-brand-block">
+                <p className="qf-shell-mini">QueueFree • UCLM</p>
+                <h1 className="qf-shell-title">
                   Campus Queue Management System
                 </h1>
               </div>
 
               {currentUser ? (
-                <div
-                  style={{
-                    display: "flex",
-                    gap: "10px",
-                    flexWrap: "wrap",
-                    alignItems: "center"
-                  }}
-                >
+                <div className="qf-shell-nav">
                   {currentUser.role === "user" && (
                     <NavLink to="/user" style={navStyle}>
                       User Dashboard
@@ -144,41 +237,24 @@ function AppShell() {
                     </NavLink>
                   )}
 
-                  <div
-                    style={{
-                      padding: "12px 16px",
-                      borderRadius: "14px",
-                      background: "rgba(255,255,255,0.05)",
-                      border: "1px solid rgba(255,255,255,0.08)",
-                      color: "#cbd5e1",
-                      fontSize: "14px",
-                      fontWeight: "700"
-                    }}
-                  >
-                    {currentUser.role.toUpperCase()}
+                  <div className="qf-shell-role-chip">
+                    {String(currentUser.role || "user").toUpperCase()}
                   </div>
 
                   <button
+                    type="button"
                     onClick={logout}
-                    style={{
-                      padding: "12px 18px",
-                      borderRadius: "14px",
-                      border: "1px solid rgba(239,68,68,0.25)",
-                      background: "rgba(239,68,68,0.14)",
-                      color: "#fecaca",
-                      fontWeight: "700",
-                      fontSize: "14px",
-                      cursor: "pointer"
-                    }}
+                    className="qf-shell-logout-btn"
                   >
                     Logout
                   </button>
                 </div>
               ) : (
-                <div style={{ display: "flex", gap: "10px", flexWrap: "wrap" }}>
+                <div className="qf-shell-nav">
                   <NavLink to="/login" style={navStyle}>
                     Login
                   </NavLink>
+
                   <NavLink to="/signup" style={navStyle}>
                     Signup
                   </NavLink>
@@ -186,15 +262,9 @@ function AppShell() {
               )}
             </div>
           </div>
-        </div>
+        </header>
 
-        <div
-          style={{
-            width: "100%",
-            padding: "20px",
-            boxSizing: "border-box"
-          }}
-        >
+        <main className="qf-shell-content">
           <Routes>
             <Route
               path="/"
@@ -276,7 +346,7 @@ function AppShell() {
 
             <Route path="*" element={<Navigate to="/" replace />} />
           </Routes>
-        </div>
+        </main>
       </div>
     </Router>
   );

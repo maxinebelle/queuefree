@@ -10,20 +10,26 @@
   box-sizing: border-box;
 }
 
+.qf-app-layout-drawer *,
+.qf-app-layout-drawer *::before,
+.qf-app-layout-drawer *::after {
+  box-sizing: border-box;
+}
+
 .qf-hamburger {
   position: absolute;
-  top: 22px;
-  left: 22px;
+  top: 16px;
+  left: 18px;
   z-index: 1200;
-  width: 52px;
-  height: 52px;
-  border: 1px solid rgba(46, 168, 255, 0.22);
-  border-radius: 18px;
+  width: 46px;
+  height: 46px;
+  border: 1px solid rgba(46, 168, 255, 0.25);
+  border-radius: 15px;
   background:
     linear-gradient(180deg, rgba(46, 168, 255, 0.16), rgba(46, 168, 255, 0.06)),
     rgba(8, 15, 28, 0.96);
   box-shadow:
-    0 16px 34px rgba(0, 0, 0, 0.30),
+    0 12px 26px rgba(0, 0, 0, 0.28),
     0 0 0 1px rgba(255,255,255,0.03),
     inset 0 1px 0 rgba(255,255,255,0.06);
   display: flex;
@@ -37,14 +43,14 @@
 
 .qf-hamburger:hover {
   transform: translateY(-1px);
-  border-color: rgba(46, 168, 255, 0.44);
+  border-color: rgba(46, 168, 255, 0.50);
   box-shadow:
-    0 18px 38px rgba(46, 168, 255, 0.16),
+    0 14px 30px rgba(46, 168, 255, 0.14),
     inset 0 1px 0 rgba(255,255,255,0.06);
 }
 
 .qf-hamburger span {
-  width: 20px;
+  width: 19px;
   height: 2px;
   border-radius: 999px;
   background: #ffffff;
@@ -203,7 +209,6 @@
   display: inline-flex;
   align-items: center;
   justify-content: center;
-  box-sizing: border-box;
 }
 
 .qf-sidebar-overlay {
@@ -214,11 +219,10 @@
 }
 
 .qf-main-content-full {
-  padding: 22px 24px 24px 90px;
-  box-sizing: border-box;
+  padding: 14px 18px 18px 76px;
   display: flex;
   flex-direction: column;
-  gap: 20px;
+  gap: 16px;
   width: 100%;
   overflow-x: hidden;
 }
@@ -226,15 +230,15 @@
 .qf-top-hero {
   display: grid;
   grid-template-columns: 1.3fr 0.7fr;
-  gap: 20px;
-  padding: 28px;
-  border-radius: 28px;
+  gap: 16px;
+  padding: 24px;
+  border-radius: 26px;
   border: 1px solid rgba(255, 255, 255, 0.08);
   background:
     radial-gradient(circle at top right, rgba(88, 199, 255, 0.20), transparent 28%),
     linear-gradient(180deg, rgba(5, 10, 18, 0.90), rgba(2, 5, 10, 0.96));
   box-shadow:
-    0 24px 60px rgba(0, 0, 0, 0.34),
+    0 20px 44px rgba(0, 0, 0, 0.30),
     inset 0 1px 0 rgba(255, 255, 255, 0.03);
 }
 
@@ -248,18 +252,18 @@
   width: fit-content;
   padding: 8px 14px;
   border-radius: 999px;
-  background: rgba(46, 168, 255, 0.10);
-  border: 1px solid rgba(46, 168, 255, 0.18);
+  background: rgba(46, 168, 255, 0.12);
+  border: 1px solid rgba(46, 168, 255, 0.22);
   color: #bde7ff;
   font-size: 12px;
-  font-weight: 700;
+  font-weight: 800;
   letter-spacing: 0.08em;
   text-transform: uppercase;
 }
 
 .qf-greeting h1 {
-  margin: 18px 0 10px 0;
-  font-size: 48px;
+  margin: 16px 0 10px 0;
+  font-size: 44px;
   line-height: 1.02;
   font-weight: 900;
   color: #ffffff;
@@ -270,18 +274,18 @@
   max-width: 720px;
   color: rgba(255, 255, 255, 0.72);
   font-size: 15px;
-  line-height: 1.8;
+  line-height: 1.75;
 }
 
 .qf-hero-side-summary {
   display: grid;
-  gap: 14px;
+  gap: 12px;
   align-content: center;
 }
 
 .qf-side-stat {
-  padding: 22px;
-  border-radius: 22px;
+  padding: 18px;
+  border-radius: 20px;
   background: rgba(255,255,255,0.04);
   border: 1px solid rgba(255,255,255,0.10);
 }
@@ -289,31 +293,30 @@
 .qf-side-stat span {
   display: block;
   color: #94a3b8;
-  font-size: 12px;
+  font-size: 11px;
   letter-spacing: 0.08em;
   text-transform: uppercase;
 }
 
 .qf-side-stat strong {
   display: block;
-  margin-top: 10px;
+  margin-top: 8px;
   color: #ffffff;
-  font-size: 28px;
+  font-size: 24px;
   font-weight: 900;
   line-height: 1.2;
   word-break: break-word;
 }
 
 .qf-panel-v2 {
-  padding: 26px;
-  border-radius: 26px;
+  padding: 22px;
+  border-radius: 24px;
   background:
     linear-gradient(180deg, rgba(255, 255, 255, 0.025), rgba(255, 255, 255, 0.01)),
     rgba(15, 23, 42, 0.78);
   border: 1px solid rgba(148, 163, 184, 0.12);
-  box-shadow: 0 18px 30px rgba(0, 0, 0, 0.20);
+  box-shadow: 0 16px 28px rgba(0, 0, 0, 0.18);
   backdrop-filter: blur(14px);
-  box-sizing: border-box;
 }
 
 .qf-panel-head {
@@ -321,7 +324,7 @@
   justify-content: space-between;
   align-items: flex-start;
   gap: 12px;
-  margin-bottom: 18px;
+  margin-bottom: 16px;
 }
 
 .qf-panel-head-no-margin {
@@ -331,20 +334,20 @@
 .qf-panel-head h2 {
   margin: 0;
   color: #ffffff;
-  font-size: 28px;
+  font-size: 26px;
   font-weight: 900;
 }
 
 .qf-panel-head p {
-  margin: 8px 0 0 0;
+  margin: 7px 0 0 0;
   color: #94a3b8;
   font-size: 14px;
-  line-height: 1.65;
+  line-height: 1.6;
 }
 
 .qf-live-summary-card {
-  padding: 24px;
-  border-radius: 24px;
+  padding: 20px;
+  border-radius: 22px;
   background:
     linear-gradient(180deg, rgba(255,255,255,0.03), rgba(255,255,255,0.01)),
     #0b1220;
@@ -356,12 +359,12 @@
   justify-content: space-between;
   gap: 12px;
   align-items: flex-start;
-  margin-bottom: 18px;
+  margin-bottom: 16px;
 }
 
 .qf-live-summary-top h3 {
   margin: 0;
-  font-size: 24px;
+  font-size: 22px;
   font-weight: 900;
   color: #ffffff;
 }
@@ -375,8 +378,8 @@
 }
 
 .qf-live-big-number {
-  padding: 20px;
-  border-radius: 22px;
+  padding: 18px;
+  border-radius: 20px;
   background: #0f172a;
   border: 1px solid rgba(148, 163, 184, 0.12);
 }
@@ -391,8 +394,8 @@
 
 .qf-live-big-number strong {
   display: block;
-  margin-top: 12px;
-  font-size: 42px;
+  margin-top: 10px;
+  font-size: 40px;
   font-weight: 900;
   color: #2ea8ff;
 }
@@ -400,13 +403,13 @@
 .qf-live-metrics-grid {
   display: grid;
   grid-template-columns: repeat(4, 1fr);
-  gap: 14px;
-  margin-top: 16px;
+  gap: 12px;
+  margin-top: 14px;
 }
 
 .qf-live-metric-box {
-  padding: 16px;
-  border-radius: 18px;
+  padding: 14px;
+  border-radius: 16px;
   background: #0f172a;
   border: 1px solid rgba(148, 163, 184, 0.10);
 }
@@ -423,14 +426,14 @@
   display: block;
   margin-top: 8px;
   color: #ffffff;
-  font-size: 20px;
+  font-size: 19px;
   font-weight: 800;
 }
 
 .qf-queue-bottom-grid {
   display: grid;
   grid-template-columns: 1.2fr 0.8fr;
-  gap: 20px;
+  gap: 16px;
 }
 
 .qf-field-group label {
@@ -443,7 +446,7 @@
 
 .qf-input-v2 {
   width: 100%;
-  height: 52px;
+  height: 50px;
   padding: 0 16px;
   border-radius: 14px;
   border: 1px solid rgba(255, 255, 255, 0.16);
@@ -451,12 +454,11 @@
   color: #ffffff;
   font-size: 14px;
   outline: none;
-  box-sizing: border-box;
 }
 
 .qf-primary-btn-v2 {
   min-width: 220px;
-  height: 52px;
+  height: 50px;
   padding: 0 20px;
   border: none;
   border-radius: 999px;
@@ -470,7 +472,7 @@
 
 .qf-secondary-btn {
   width: 100%;
-  min-height: 46px;
+  min-height: 44px;
   padding: 0 16px;
   border: 1px solid rgba(255,255,255,0.14);
   border-radius: 14px;
@@ -482,8 +484,8 @@
 }
 
 .qf-danger-btn {
-  min-width: 160px;
-  height: 44px;
+  min-width: 150px;
+  height: 42px;
   padding: 0 18px;
   border: none;
   border-radius: 999px;
@@ -512,7 +514,7 @@
 }
 
 .qf-empty-state-v2 {
-  padding: 40px 24px;
+  padding: 34px 22px;
   border-radius: 20px;
   background: #0f172a;
   border: 1px solid rgba(148, 163, 184, 0.10);
@@ -599,6 +601,7 @@
   font-size: 14px;
   line-height: 1.5;
   word-break: break-word;
+  overflow-wrap: anywhere;
 }
 
 .qf-history-action-row {
@@ -733,11 +736,11 @@
 }
 
 .qf-queue-date-card {
-  padding: 18px 20px;
-  border-radius: 20px;
+  padding: 16px 18px;
+  border-radius: 18px;
   background: #0f172a;
   border: 1px solid rgba(148, 163, 184, 0.12);
-  margin-bottom: 16px;
+  margin-bottom: 14px;
 }
 
 .qf-queue-date-card span {
@@ -752,26 +755,26 @@
   display: block;
   margin-top: 8px;
   color: #ffffff;
-  font-size: 20px;
+  font-size: 19px;
   font-weight: 800;
 }
 
 .qf-office-selection-list {
   display: grid;
-  gap: 14px;
+  gap: 12px;
 }
 
 .qf-office-select-card {
   width: 100%;
-  padding: 18px;
-  border-radius: 22px;
+  padding: 16px;
+  border-radius: 20px;
   border: 1px solid rgba(148, 163, 184, 0.12);
   background:
     linear-gradient(180deg, rgba(255,255,255,0.03), rgba(255,255,255,0.01)),
     #0b1220;
   display: grid;
   grid-template-columns: 0.9fr 1.1fr;
-  gap: 18px;
+  gap: 16px;
   text-align: left;
   cursor: pointer;
   transition: 0.2s ease;
@@ -790,9 +793,9 @@
 }
 
 .qf-office-icon-circle {
-  width: 56px;
-  height: 56px;
-  min-width: 56px;
+  width: 54px;
+  height: 54px;
+  min-width: 54px;
   border-radius: 16px;
   background: linear-gradient(135deg, #2ea8ff 0%, #1f8fff 100%);
   color: #ffffff;
@@ -806,7 +809,7 @@
 .qf-office-main-info h3 {
   margin: 0;
   color: #ffffff;
-  font-size: 22px;
+  font-size: 21px;
   font-weight: 800;
 }
 
@@ -824,8 +827,8 @@
 }
 
 .qf-office-mini-info {
-  padding: 14px;
-  border-radius: 16px;
+  padding: 12px;
+  border-radius: 15px;
   background: #0f172a;
   border: 1px solid rgba(148, 163, 184, 0.10);
 }
@@ -842,7 +845,7 @@
   display: block;
   margin-top: 8px;
   color: #ffffff;
-  font-size: 16px;
+  font-size: 15px;
   font-weight: 800;
   line-height: 1.4;
 }
@@ -850,7 +853,7 @@
 .qf-queue-action-row {
   display: flex;
   justify-content: flex-end;
-  margin-top: 18px;
+  margin-top: 16px;
 }
 
 .qf-queue-page-btn {
@@ -931,13 +934,12 @@
   font-size: 13px;
 }
 
-/* NOTIFICATIONS */
 .qf-notification-head-row {
   display: flex;
   justify-content: space-between;
   align-items: flex-start;
   gap: 16px;
-  margin-bottom: 18px;
+  margin-bottom: 16px;
 }
 
 .qf-mark-read-btn {
@@ -957,7 +959,7 @@
   display: flex;
   gap: 10px;
   flex-wrap: wrap;
-  margin-bottom: 18px;
+  margin-bottom: 16px;
 }
 
 .qf-notification-filter-pill {
@@ -979,13 +981,13 @@
 
 .qf-notification-list {
   display: grid;
-  gap: 16px;
+  gap: 14px;
 }
 
 .qf-notification-card {
   width: 100%;
-  padding: 20px;
-  border-radius: 22px;
+  padding: 18px;
+  border-radius: 20px;
   background:
     linear-gradient(180deg, rgba(255,255,255,0.03), rgba(255,255,255,0.01)),
     #0b1220;
@@ -1095,35 +1097,34 @@
     inset 0 0 0 1px rgba(46, 168, 255, 0.04);
 }
 
-/* CENTER AI POPUP */
 .qf-ai-popup {
   position: fixed;
   inset: 0;
   z-index: 3000;
   display: flex;
-  align-items: center;
+  align-items: flex-start;
   justify-content: center;
-  padding: 18px;
-  background: rgba(0, 0, 0, 0.38);
-  backdrop-filter: blur(4px);
-  box-sizing: border-box;
+  padding: 92px 18px 18px;
+  background: rgba(0, 0, 0, 0.42);
+  backdrop-filter: blur(6px);
   animation: qfPopupOverlayFade 0.22s ease;
 }
 
 .qf-ai-popup-card {
+  position: relative;
   width: min(1040px, calc(100vw - 36px));
-  min-height: 170px;
-  padding: 18px;
+  min-height: 150px;
+  padding: 20px 62px 20px 20px;
   border-radius: 26px;
   background:
-    radial-gradient(circle at top left, rgba(46, 168, 255, 0.38), transparent 34%),
-    radial-gradient(circle at bottom right, rgba(232, 121, 249, 0.26), transparent 34%),
+    radial-gradient(circle at top left, rgba(46, 168, 255, 0.42), transparent 34%),
+    radial-gradient(circle at bottom right, rgba(232, 121, 249, 0.30), transparent 34%),
     linear-gradient(135deg, rgba(8, 15, 28, 0.98), rgba(12, 22, 39, 0.98));
-  border: 1px solid rgba(96, 165, 250, 0.40);
+  border: 1px solid rgba(96, 165, 250, 0.44);
   box-shadow:
     0 34px 90px rgba(0, 0, 0, 0.58),
     0 0 0 1px rgba(255,255,255,0.04),
-    0 0 38px rgba(46, 168, 255, 0.20);
+    0 0 42px rgba(46, 168, 255, 0.24);
   backdrop-filter: blur(18px);
   display: grid;
   grid-template-columns: 1.25fr 0.8fr auto;
@@ -1133,28 +1134,28 @@
 }
 
 .qf-ai-popup-card.qf-notification-turn {
-  border-color: rgba(34, 197, 94, 0.55);
+  border-color: rgba(34, 197, 94, 0.58);
   box-shadow:
     0 34px 90px rgba(0, 0, 0, 0.58),
-    0 0 42px rgba(34, 197, 94, 0.20);
+    0 0 46px rgba(34, 197, 94, 0.24);
 }
 
 .qf-ai-popup-card.qf-notification-next {
-  border-color: rgba(46, 168, 255, 0.58);
+  border-color: rgba(46, 168, 255, 0.62);
   box-shadow:
     0 34px 90px rgba(0, 0, 0, 0.58),
-    0 0 42px rgba(46, 168, 255, 0.24);
+    0 0 46px rgba(46, 168, 255, 0.28);
 }
 
 .qf-ai-popup-card.qf-notification-warning {
-  border-color: rgba(245, 158, 11, 0.58);
+  border-color: rgba(245, 158, 11, 0.62);
   box-shadow:
     0 34px 90px rgba(0, 0, 0, 0.58),
-    0 0 42px rgba(245, 158, 11, 0.22);
+    0 0 46px rgba(245, 158, 11, 0.26);
 }
 
 .qf-ai-popup-card.qf-notification-ai {
-  border-color: rgba(46, 168, 255, 0.58);
+  border-color: rgba(46, 168, 255, 0.62);
 }
 
 .qf-ai-popup-left {
@@ -1171,15 +1172,15 @@
   padding: 0 12px;
   border-radius: 999px;
   background:
-    linear-gradient(135deg, rgba(46, 168, 255, 0.28), rgba(232, 121, 249, 0.20));
-  border: 1px solid rgba(191, 219, 254, 0.32);
+    linear-gradient(135deg, rgba(46, 168, 255, 0.34), rgba(232, 121, 249, 0.25));
+  border: 1px solid rgba(191, 219, 254, 0.36);
   color: #dbeafe;
   font-size: 12px;
   font-weight: 900;
   display: inline-flex;
   align-items: center;
   justify-content: center;
-  box-shadow: 0 0 20px rgba(46, 168, 255, 0.14);
+  box-shadow: 0 0 22px rgba(46, 168, 255, 0.18);
 }
 
 .qf-ai-popup-card h3 {
@@ -1242,12 +1243,15 @@
 }
 
 .qf-ai-popup-close {
-  width: 42px;
-  height: 42px;
-  min-width: 42px;
+  position: absolute;
+  top: 14px;
+  right: 14px;
+  width: 38px;
+  height: 38px;
+  min-width: 38px;
   border-radius: 14px;
-  border: 1px solid rgba(255,255,255,0.16);
-  background: rgba(255,255,255,0.06);
+  border: 1px solid rgba(255,255,255,0.18);
+  background: rgba(255,255,255,0.08);
   color: #ffffff;
   cursor: pointer;
   font-size: 16px;
@@ -1265,7 +1269,7 @@
 @keyframes qfPopupCenterIn {
   from {
     opacity: 0;
-    transform: translateY(18px) scale(0.97);
+    transform: translateY(-12px) scale(0.98);
   }
   to {
     opacity: 1;
@@ -1273,7 +1277,6 @@
   }
 }
 
-/* RESPONSIVE */
 @media (max-width: 1200px) {
   .qf-top-hero,
   .qf-queue-bottom-grid {
@@ -1307,26 +1310,26 @@
   }
 
   .qf-hamburger {
-    top: 16px;
-    left: 16px;
-    width: 48px;
-    height: 48px;
-    border-radius: 16px;
+    top: 14px;
+    left: 14px;
+    width: 44px;
+    height: 44px;
+    border-radius: 15px;
   }
 
   .qf-main-content-full {
-    padding: 78px 16px 16px 16px;
-    gap: 16px;
+    padding: 14px 14px 14px 68px;
+    gap: 14px;
   }
 
   .qf-top-hero,
   .qf-panel-v2 {
-    padding: 20px;
+    padding: 18px;
     border-radius: 22px;
   }
 
   .qf-greeting h1 {
-    font-size: 36px;
+    font-size: 34px;
   }
 
   .qf-live-metrics-grid,
@@ -1369,13 +1372,13 @@
   }
 
   .qf-ai-popup {
-    align-items: center;
-    padding: 14px;
+    align-items: flex-start;
+    padding: 78px 14px 14px;
   }
 
   .qf-ai-popup-card {
     width: 100%;
-    padding: 16px;
+    padding: 16px 58px 16px 16px;
     border-radius: 22px;
     grid-template-columns: 1fr;
     gap: 14px;
@@ -1391,15 +1394,24 @@
   }
 
   .qf-ai-popup-primary,
-  .qf-ai-popup-secondary,
-  .qf-ai-popup-close {
+  .qf-ai-popup-secondary {
     width: 100%;
+  }
+
+  .qf-ai-popup-close {
+    width: 38px;
+    height: 38px;
+    min-width: 38px;
   }
 }
 
 @media (max-width: 480px) {
+  .qf-main-content-full {
+    padding: 12px 12px 12px 64px;
+  }
+
   .qf-greeting h1 {
-    font-size: 30px;
+    font-size: 29px;
   }
 
   .qf-live-big-number strong {

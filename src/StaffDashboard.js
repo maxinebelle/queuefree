@@ -33,6 +33,7 @@ function StaffDashboard() {
 
   const assignedOffice = currentUser?.office_assignment || "";
   const assignedWindow = currentUser?.window_assignment || "Window 1";
+
   const staffDisplayName =
     `${currentUser?.first_name || ""} ${currentUser?.last_name || ""}`.trim() ||
     currentUser?.email?.split("@")[0] ||
@@ -160,7 +161,8 @@ function StaffDashboard() {
         if (ticket.status === "Paused") return 1;
         if (ticket.status === "Pending") return 2;
         if (ticket.status === "Done") return 3;
-        return 4;
+        if (ticket.status === "Reset") return 4;
+        return 5;
       };
 
       const aStatusOrder = getStatusOrder(a);
@@ -206,7 +208,10 @@ function StaffDashboard() {
   );
 
   const doneTickets = useMemo(
-    () => sortedTickets.filter((ticket) => ticket.status === "Done"),
+    () =>
+      sortedTickets.filter(
+        (ticket) => ticket.status === "Done" || ticket.status === "Reset"
+      ),
     [sortedTickets]
   );
 
@@ -259,6 +264,17 @@ function StaffDashboard() {
     return sortedTickets.length;
   }, [sortedTickets]);
 
+  const normalizeDisplayValue = (value) => {
+    if (!value) return "-";
+
+    const text = String(value).trim();
+
+    if (text === "0") return "-";
+    if (/^[A-Z]P?000$/i.test(text)) return "-";
+
+    return text;
+  };
+
   const getAverageWaitMinutes = () => {
     const avg = selectedDept?.avg_service_time || 0;
     return `${avg} min`;
@@ -292,6 +308,7 @@ function StaffDashboard() {
       .filter(
         (item) =>
           item.status !== "Done" &&
+          item.status !== "Reset" &&
           item.dept_id === ticket.dept_id &&
           (item.lane_type || "Regular") === laneType
       )
@@ -318,6 +335,10 @@ function StaffDashboard() {
       return "Completed";
     }
 
+    if (ticket.status === "Reset") {
+      return "Cleared by reset";
+    }
+
     if (ticket.status === "Serving") {
       return "Now serving";
     }
@@ -328,6 +349,7 @@ function StaffDashboard() {
       .filter(
         (item) =>
           item.status !== "Done" &&
+          item.status !== "Reset" &&
           item.dept_id === ticket.dept_id &&
           (item.lane_type || "Regular") === laneType
       )
@@ -349,22 +371,30 @@ function StaffDashboard() {
     return `${index} queue number${index === 1 ? "" : "s"} before turn`;
   };
 
+  const getWindowLabel = (ticket) => {
+    return ticket?.window_assignment || assignedWindow || "Window 1";
+  };
+
   const updateDepartmentServingDisplay = async (ticketData) => {
     if (!selectedDept) return;
 
     const deptRef = doc(db, "departments", selectedDept.id);
+    const windowValue = assignedWindow || "Window 1";
 
     const payload = {
       current_number: ticketData?.lane_number || 0,
-      current_serving_display: ticketData?.ticket_number || "-"
+      current_serving_display: ticketData?.ticket_number || "-",
+      current_serving_window: windowValue
     };
 
     if ((ticketData?.lane_type || "Regular") === "Priority") {
       payload.priority_now_serving_number = ticketData?.lane_number || 0;
       payload.priority_now_serving_display = ticketData?.ticket_number || "-";
+      payload.priority_now_serving_window = windowValue;
     } else {
       payload.regular_now_serving_number = ticketData?.lane_number || 0;
       payload.regular_now_serving_display = ticketData?.ticket_number || "-";
+      payload.regular_now_serving_window = windowValue;
     }
 
     await updateDoc(deptRef, payload);
@@ -377,15 +407,18 @@ function StaffDashboard() {
 
     const payload = {
       current_number: 0,
-      current_serving_display: "-"
+      current_serving_display: "-",
+      current_serving_window: ""
     };
 
     if ((ticketData?.lane_type || "Regular") === "Priority") {
       payload.priority_now_serving_number = 0;
       payload.priority_now_serving_display = "-";
+      payload.priority_now_serving_window = "";
     } else {
       payload.regular_now_serving_number = 0;
       payload.regular_now_serving_display = "-";
+      payload.regular_now_serving_window = "";
     }
 
     await updateDoc(deptRef, payload);
@@ -453,8 +486,8 @@ function StaffDashboard() {
       await updateDepartmentServingDisplay(nextTicket);
 
       alert(
-        `Now serving: ${nextTicket.ticket_number}${
-          assignedWindow ? ` at ${assignedWindow}` : ""
+        `Now serving: ${nextTicket.ticket_number} at ${
+          assignedWindow || "Window 1"
         }`
       );
     } catch (error) {
@@ -512,14 +545,19 @@ function StaffDashboard() {
       await addDoc(collection(db, "transactions"), {
         ticket_id: currentServingTicket.id,
         ticket_number: currentServingTicket.ticket_number || "",
+        user_id: currentServingTicket.user_id || "",
+        user_name: currentServingTicket.user_name || "",
+        student_no: currentServingTicket.student_no || "",
         dept_id: selectedDept.id,
         dept_name: selectedDept.dept_name || selectedDeptName,
         lane_type: currentServingTicket.lane_type || "Regular",
+        priority_type: currentServingTicket.priority_type || "Regular",
         start_time: startDate || null,
         end_time: serverTimestamp(),
         duration_sec: durationSec,
         window_assignment: assignedWindow || "Window 1",
-        served_by: currentUser?.uid || ""
+        served_by: currentUser?.uid || "",
+        served_by_name: staffDisplayName || "Staff"
       });
 
       await clearDepartmentServingDisplay(currentServingTicket);
@@ -600,7 +638,7 @@ function StaffDashboard() {
 
       await updateDepartmentServingDisplay(ticket);
 
-      alert(`Resumed: ${ticket.ticket_number}`);
+      alert(`Resumed: ${ticket.ticket_number} at ${assignedWindow || "Window 1"}`);
     } catch (error) {
       console.error("RESUME PAUSED ERROR:", error);
 
@@ -619,7 +657,9 @@ function StaffDashboard() {
 
   const getStatusClass = (status) => {
     if (status === "Serving") return "qf-staff-status qf-staff-status-serving";
-    if (status === "Done") return "qf-staff-status qf-staff-status-done";
+    if (status === "Done" || status === "Reset") {
+      return "qf-staff-status qf-staff-status-done";
+    }
     if (status === "Paused") return "qf-staff-status qf-staff-status-paused";
     return "qf-staff-status qf-staff-status-pending";
   };
@@ -637,8 +677,8 @@ function StaffDashboard() {
           <div className="qf-staff-badge">STAFF CONTROL PANEL</div>
           <h1>{selectedDeptName} Queue Operations</h1>
           <p>
-            Monitor live queue flow, serve the next ticket correctly, and manage
-            your assigned office in real time.
+            Monitor live queue flow, serve the next ticket correctly, and guide
+            users to the assigned service window.
           </p>
         </div>
 
@@ -649,7 +689,7 @@ function StaffDashboard() {
           </div>
 
           <div className="qf-staff-mini-card">
-            <span>Window</span>
+            <span>Assigned Window</span>
             <strong>{assignedWindow || "-"}</strong>
           </div>
 
@@ -678,22 +718,22 @@ function StaffDashboard() {
       <section className="qf-staff-summary-grid">
         <div className="qf-staff-summary-card">
           <span>Regular Now Serving</span>
-          <strong>{selectedDept?.regular_now_serving_display || "-"}</strong>
+          <strong>{normalizeDisplayValue(selectedDept?.regular_now_serving_display)}</strong>
+        </div>
+
+        <div className="qf-staff-summary-card">
+          <span>Regular Window</span>
+          <strong>{selectedDept?.regular_now_serving_window || "-"}</strong>
         </div>
 
         <div className="qf-staff-summary-card priority">
           <span>Priority Now Serving</span>
-          <strong>{selectedDept?.priority_now_serving_display || "-"}</strong>
+          <strong>{normalizeDisplayValue(selectedDept?.priority_now_serving_display)}</strong>
         </div>
 
-        <div className="qf-staff-summary-card">
-          <span>Next Up</span>
-          <strong>{nextUpTicket?.ticket_number || "-"}</strong>
-        </div>
-
-        <div className="qf-staff-summary-card">
-          <span>Avg. Service Time</span>
-          <strong>{getAverageWaitMinutes()}</strong>
+        <div className="qf-staff-summary-card priority">
+          <span>Priority Window</span>
+          <strong>{selectedDept?.priority_now_serving_window || "-"}</strong>
         </div>
       </section>
 
@@ -753,7 +793,7 @@ function StaffDashboard() {
           <div className="qf-staff-panel-head">
             <div>
               <h2>Now Serving</h2>
-              <p>The ticket currently being handled in your window.</p>
+              <p>The ticket currently being handled in your assigned window.</p>
             </div>
           </div>
 
@@ -786,10 +826,8 @@ function StaffDashboard() {
                 </div>
 
                 <div className="qf-staff-meta-box">
-                  <span>Window</span>
-                  <strong>
-                    {currentServingTicket.window_assignment || assignedWindow || "-"}
-                  </strong>
+                  <span>Assigned Window</span>
+                  <strong>{getWindowLabel(currentServingTicket)}</strong>
                 </div>
 
                 <div className="qf-staff-meta-box">
@@ -873,8 +911,8 @@ function StaffDashboard() {
         <div>
           <h2>Queue Control</h2>
           <p>
-            Priority tickets appear before regular tickets. Staff can monitor the
-            full live queue for the assigned office.
+            Priority tickets appear before regular tickets. The assigned window is
+            shown when a ticket is called.
           </p>
         </div>
       </div>
@@ -951,6 +989,11 @@ function StaffDashboard() {
                     </div>
 
                     <div className="qf-staff-meta-box">
+                      <span>Assigned Window</span>
+                      <strong>{ticket.window_assignment || "Not called yet"}</strong>
+                    </div>
+
+                    <div className="qf-staff-meta-box">
                       <span>Created</span>
                       <strong>{getReadableDateTime(ticket.created_at)}</strong>
                     </div>
@@ -1008,6 +1051,11 @@ function StaffDashboard() {
                     </div>
 
                     <div className="qf-staff-meta-box">
+                      <span>Assigned Window</span>
+                      <strong>{ticket.window_assignment || "Not called yet"}</strong>
+                    </div>
+
+                    <div className="qf-staff-meta-box">
                       <span>Created</span>
                       <strong>{getReadableDateTime(ticket.created_at)}</strong>
                     </div>
@@ -1026,7 +1074,7 @@ function StaffDashboard() {
       <div className="qf-staff-panel-head">
         <div>
           <h2>Completed Records</h2>
-          <p>Finished tickets handled inside the selected department.</p>
+          <p>Finished tickets and reset-cleared tickets handled inside the selected department.</p>
         </div>
       </div>
 
@@ -1043,7 +1091,7 @@ function StaffDashboard() {
                 </div>
 
                 <span className={getStatusClass(ticket.status)}>
-                  {ticket.status}
+                  {ticket.status || "Done"}
                 </span>
               </div>
 
@@ -1059,7 +1107,7 @@ function StaffDashboard() {
                 </div>
 
                 <div className="qf-staff-meta-box">
-                  <span>Window</span>
+                  <span>Assigned Window</span>
                   <strong>{ticket.window_assignment || "-"}</strong>
                 </div>
 
@@ -1076,6 +1124,16 @@ function StaffDashboard() {
                 <div className="qf-staff-meta-box">
                   <span>Status</span>
                   <strong>{ticket.status || "-"}</strong>
+                </div>
+
+                <div className="qf-staff-meta-box">
+                  <span>Queue Position</span>
+                  <strong>{getQueuePositionLabel(ticket)}</strong>
+                </div>
+
+                <div className="qf-staff-meta-box">
+                  <span>Reset By Admin</span>
+                  <strong>{ticket.reset_by_admin ? "Yes" : "No"}</strong>
                 </div>
               </div>
             </div>
@@ -1130,6 +1188,7 @@ function StaffDashboard() {
           <div>
             <strong>{staffDisplayName}</strong>
             <p>{assignedOffice || "Queue Operations"}</p>
+            <p>{assignedWindow || "Window 1"}</p>
           </div>
         </div>
 

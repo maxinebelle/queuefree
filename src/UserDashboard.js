@@ -127,6 +127,7 @@ function UserDashboard() {
           id: docSnap.id,
           ...docSnap.data()
         }));
+
         setAllTickets(tickets);
       },
       (error) => {
@@ -181,7 +182,9 @@ function UserDashboard() {
           const deptName =
             Object.keys(departmentData).find(
               (name) => departmentData[name]?.id === data.dept_id
-            ) || data.dept_name || "Unknown";
+            ) ||
+            data.dept_name ||
+            "Unknown";
 
           return {
             id: docSnap.id,
@@ -259,6 +262,39 @@ function UserDashboard() {
     return effectiveLaneDetails.laneType;
   }, [effectiveLaneDetails]);
 
+  const getWindowDisplay = (ticket) => {
+    if (!ticket) return "-";
+
+    const assignedWindow =
+      ticket.window_assignment ||
+      ticket.assigned_window ||
+      ticket.serving_window ||
+      ticket.window ||
+      "";
+
+    if (assignedWindow) return assignedWindow;
+
+    if (ticket.status === "Serving") return "Please ask staff for your serving window.";
+
+    return "To be assigned when called";
+  };
+
+  const getProceedInstruction = (ticket) => {
+    if (!ticket) return "Please proceed to the assigned window when called.";
+
+    const windowDisplay = getWindowDisplay(ticket);
+
+    if (ticket.status === "Serving") {
+      return `Please proceed to ${ticket.deptName} - ${windowDisplay}.`;
+    }
+
+    if (windowDisplay === "To be assigned when called") {
+      return `Please wait for ${ticket.deptName} staff to assign your serving window.`;
+    }
+
+    return `Please proceed to ${ticket.deptName} - ${windowDisplay} when called.`;
+  };
+
   const getDepartmentLaneQueue = (ticket) => {
     const laneType = ticket.lane_type || "Regular";
 
@@ -294,6 +330,7 @@ function UserDashboard() {
     const index = orderedQueue.findIndex((item) => item.id === ticket.id);
 
     if (index === -1) return "-";
+
     return index;
   };
 
@@ -305,6 +342,7 @@ function UserDashboard() {
     const index = orderedQueue.findIndex((item) => item.id === ticket.id);
 
     if (index === -1) return "-";
+
     return orderedQueue.length - index - 1;
   };
 
@@ -315,17 +353,17 @@ function UserDashboard() {
     );
 
     if (
-      ticket.initial_estimated_wait_min !== undefined &&
-      ticket.initial_estimated_wait_min !== null
-    ) {
-      return Number(ticket.initial_estimated_wait_min || 0);
-    }
-
-    if (
       ticket.status === "Done" ||
       ticket.status === "Cancelled" ||
       ticket.status === "Reset"
     ) {
+      if (
+        ticket.initial_estimated_wait_min !== undefined &&
+        ticket.initial_estimated_wait_min !== null
+      ) {
+        return Number(ticket.initial_estimated_wait_min || 0);
+      }
+
       const initialAhead = Number(
         ticket.initial_people_ahead ?? Math.max((ticket.lane_number || 1) - 1, 0)
       );
@@ -361,6 +399,22 @@ function UserDashboard() {
     return ahead;
   };
 
+  const getNumbersBeforeTurnLabel = (ticket) => {
+    const beforeTurn = getNumbersBeforeTurn(ticket);
+
+    if (ticket.status === "Serving") return "Your number is being served now.";
+    if (ticket.status === "Done") return "This queue ticket has been completed.";
+    if (ticket.status === "Cancelled") return "This queue ticket was cancelled.";
+    if (ticket.status === "Reset") return "This queue ticket was cleared by reset.";
+
+    if (typeof beforeTurn !== "number") return "Checking your queue position.";
+
+    if (beforeTurn === 0) return "You are next in line.";
+    if (beforeTurn === 1) return "1 queue number is before your turn.";
+
+    return `${beforeTurn} queue numbers are before your turn.`;
+  };
+
   const getDisplayStatus = (ticket) => {
     if (ticket.status === "Done") return "Done";
     if (ticket.status === "Serving") return "Serving";
@@ -376,6 +430,7 @@ function UserDashboard() {
     if (status === "Serving") return "qf-status qf-status-serving";
     if (status === "Done") return "qf-status qf-status-done";
     if (status === "Paused") return "qf-status qf-status-paused";
+
     if (status === "Cancelled" || status === "Reset") {
       return "qf-status qf-status-done";
     }
@@ -498,7 +553,7 @@ function UserDashboard() {
         return;
       }
 
-      const ticketNumber = await runTransaction(db, async (transaction) => {
+      const ticketResult = await runTransaction(db, async (transaction) => {
         const userRef = doc(db, "users", currentUser.uid);
         const deptRef = doc(db, "departments", selectedDept.id);
         const newTicketRef = doc(collection(db, "queue_tickets"));
@@ -532,7 +587,6 @@ function UserDashboard() {
           : "regular_last_number";
 
         const currentLaneLast = Number(deptData[laneLastField] || 0);
-
         const nextLaneNumber =
           currentLaneLast >= MAX_QUEUE_NUMBER ? 1 : currentLaneLast + 1;
 
@@ -544,7 +598,17 @@ function UserDashboard() {
           : `${prefix}${String(nextLaneNumber).padStart(3, "0")}`;
 
         const avgServiceTime = Number(deptData.avg_service_time || 0);
-        const initialPeopleAhead = Math.max(nextLaneNumber - 1, 0);
+
+        const sameLaneActiveCount = allTickets.filter(
+          (ticket) =>
+            ticket.dept_id === selectedDept.id &&
+            ticket.status !== "Done" &&
+            ticket.status !== "Cancelled" &&
+            ticket.status !== "Reset" &&
+            (ticket.lane_type || "Regular") === laneType
+        ).length;
+
+        const initialPeopleAhead = Math.max(sameLaneActiveCount, 0);
         const initialEstimatedWaitMin = initialPeopleAhead * avgServiceTime;
 
         transaction.update(deptRef, {
@@ -565,10 +629,17 @@ function UserDashboard() {
           initial_people_ahead: initialPeopleAhead,
           initial_estimated_wait_min: initialEstimatedWaitMin,
           avg_service_time_snapshot: avgServiceTime,
+          window_assignment: "",
           created_at: serverTimestamp()
         });
 
-        return formattedNumber;
+        return {
+          ticketNumber: formattedNumber,
+          laneType,
+          priorityType,
+          initialPeopleAhead,
+          initialEstimatedWaitMin
+        };
       });
 
       const requestedPriority = userProfile?.is_priority === true;
@@ -576,14 +647,16 @@ function UserDashboard() {
 
       if (requestedPriority && priorityStatus === "pending") {
         alert(
-          `Queue Number for ${selectedDeptName}: ${ticketNumber}\n\nYour priority request is still pending verification, so you were queued under the Regular lane.`
+          `Queue Number for ${selectedDeptName}: ${ticketResult.ticketNumber}\n\nLane: Regular\nWindow: To be assigned when called\n\nYour priority request is still pending verification, so you were queued under the Regular lane.`
         );
       } else if (requestedPriority && priorityStatus === "rejected") {
         alert(
-          `Queue Number for ${selectedDeptName}: ${ticketNumber}\n\nYour priority request was rejected, so you were queued under the Regular lane.`
+          `Queue Number for ${selectedDeptName}: ${ticketResult.ticketNumber}\n\nLane: Regular\nWindow: To be assigned when called\n\nYour priority request was rejected, so you were queued under the Regular lane.`
         );
       } else {
-        alert(`Queue Number for ${selectedDeptName}: ${ticketNumber}`);
+        alert(
+          `Queue Number for ${selectedDeptName}: ${ticketResult.ticketNumber}\n\nLane: ${ticketResult.laneType}\nWindow: To be assigned when called`
+        );
       }
 
       setActiveSection("queue");
@@ -662,30 +735,42 @@ function UserDashboard() {
       if (!AudioContext) return;
 
       const audioContext = new AudioContext();
-      const oscillator = audioContext.createOscillator();
+      const oscillatorOne = audioContext.createOscillator();
+      const oscillatorTwo = audioContext.createOscillator();
       const gainNode = audioContext.createGain();
 
-      oscillator.type = "sine";
-      oscillator.frequency.setValueAtTime(880, audioContext.currentTime);
-      oscillator.frequency.setValueAtTime(660, audioContext.currentTime + 0.12);
+      oscillatorOne.type = "sine";
+      oscillatorTwo.type = "triangle";
+
+      oscillatorOne.frequency.setValueAtTime(880, audioContext.currentTime);
+      oscillatorOne.frequency.setValueAtTime(660, audioContext.currentTime + 0.12);
+
+      oscillatorTwo.frequency.setValueAtTime(1320, audioContext.currentTime);
+      oscillatorTwo.frequency.setValueAtTime(990, audioContext.currentTime + 0.12);
 
       gainNode.gain.setValueAtTime(0.0001, audioContext.currentTime);
-      gainNode.gain.exponentialRampToValueAtTime(0.18, audioContext.currentTime + 0.03);
-      gainNode.gain.exponentialRampToValueAtTime(0.0001, audioContext.currentTime + 0.35);
+      gainNode.gain.exponentialRampToValueAtTime(0.22, audioContext.currentTime + 0.03);
+      gainNode.gain.exponentialRampToValueAtTime(0.0001, audioContext.currentTime + 0.42);
 
-      oscillator.connect(gainNode);
+      oscillatorOne.connect(gainNode);
+      oscillatorTwo.connect(gainNode);
       gainNode.connect(audioContext.destination);
 
-      oscillator.start(audioContext.currentTime);
-      oscillator.stop(audioContext.currentTime + 0.38);
+      oscillatorOne.start(audioContext.currentTime);
+      oscillatorTwo.start(audioContext.currentTime + 0.04);
+
+      oscillatorOne.stop(audioContext.currentTime + 0.42);
+      oscillatorTwo.stop(audioContext.currentTime + 0.42);
     } catch (error) {
       console.warn("Notification sound blocked by browser until user interacts:", error);
     }
   };
 
   const buildAiQueueMessage = (ticket, ahead, wait) => {
+    const windowDisplay = getWindowDisplay(ticket);
+
     if (ticket.status === "Serving") {
-      return `AI prediction: your queue number ${ticket.ticket_number} is now active in ${ticket.deptName}. Please proceed to the office now.`;
+      return `AI prediction: your queue number ${ticket.ticket_number} is now active in ${ticket.deptName}. Please proceed to ${windowDisplay}.`;
     }
 
     if (typeof ahead !== "number") {
@@ -693,14 +778,14 @@ function UserDashboard() {
     }
 
     if (ahead === 0) {
-      return `AI prediction: your turn is about to be called in ${ticket.deptName}. Please stay near the office now.`;
+      return `AI prediction: your turn is about to be called in ${ticket.deptName}. Please stay ready. Window assignment will appear when staff calls your number.`;
     }
 
     if (ahead === 1) {
       return `AI prediction: only 1 queue number is before your turn in ${ticket.deptName}. Please standby near the office.`;
     }
 
-    if (ahead <= 4) {
+    if (ahead <= 5) {
       return `AI prediction: your turn is approaching. ${ahead} queue numbers are still before your turn in ${ticket.deptName}. Estimated wait is ${wait}.`;
     }
 
@@ -715,10 +800,10 @@ function UserDashboard() {
       const after = getPeopleAfter(ticket);
       const wait = getEstimatedWait(ticket);
       const status = getDisplayStatus(ticket);
-      const nowServing = getNowServingDisplay(
-        ticket.deptName,
-        ticket.lane_type || "Regular"
-      );
+      const laneType = ticket.lane_type || "Regular";
+      const nowServing = getNowServingDisplay(ticket.deptName, laneType);
+      const windowDisplay = getWindowDisplay(ticket);
+      const proceedInstruction = getProceedInstruction(ticket);
 
       if (queueAlertsEnabled && status === "Serving") {
         notifications.push({
@@ -726,12 +811,17 @@ function UserDashboard() {
           category: "queue",
           type: "turn",
           title: "It's Your Turn!",
-          message: `Your queue number ${ticket.ticket_number} in ${ticket.deptName} is now being called. Please proceed to the assigned office.`,
+          message: `Your queue number ${ticket.ticket_number} in ${ticket.deptName} is now being called. ${proceedInstruction}`,
           time: "Live",
           hasMetrics: true,
+          popupEligible: true,
           ticketNumber: ticket.ticket_number,
+          deptName: ticket.deptName,
+          laneType,
           nowServing,
+          assignedWindow: windowDisplay,
           numbersBeforeTurn: ahead,
+          numbersBeforeTurnLabel: getNumbersBeforeTurnLabel(ticket),
           afterYou: after,
           estimatedWait: wait,
           popupPriority: 1
@@ -741,29 +831,39 @@ function UserDashboard() {
           id: `${ticket.id}-next`,
           category: "queue",
           type: "next",
-          title: "Queue Update",
-          message: `You're next. Current now serving is ${nowServing || "-"} and your number is ${ticket.ticket_number}.`,
+          title: "You're Next",
+          message: `Only 1 queue number is before your turn in ${ticket.deptName}. Current now serving is ${nowServing}. Your number is ${ticket.ticket_number}.`,
           time: "Live",
           hasMetrics: true,
+          popupEligible: true,
           ticketNumber: ticket.ticket_number,
+          deptName: ticket.deptName,
+          laneType,
           nowServing,
+          assignedWindow: windowDisplay,
           numbersBeforeTurn: ahead,
+          numbersBeforeTurnLabel: getNumbersBeforeTurnLabel(ticket),
           afterYou: after,
           estimatedWait: wait,
           popupPriority: 2
         });
-      } else if (queueAlertsEnabled && typeof ahead === "number" && ahead <= 3) {
+      } else if (queueAlertsEnabled && typeof ahead === "number" && ahead <= 5) {
         notifications.push({
           id: `${ticket.id}-warning`,
           category: "queue",
           type: "warning",
-          title: "Queue Update",
-          message: `Only ${ahead} queue ${ahead === 1 ? "number is" : "numbers are"} before your turn in ${ticket.deptName}. Please get ready.`,
+          title: "Your Turn Is Approaching",
+          message: `${ahead} queue number${ahead === 1 ? "" : "s"} ${ahead === 1 ? "is" : "are"} before your turn in ${ticket.deptName}. Please get ready.`,
           time: "Live",
           hasMetrics: true,
+          popupEligible: true,
           ticketNumber: ticket.ticket_number,
+          deptName: ticket.deptName,
+          laneType,
           nowServing,
+          assignedWindow: windowDisplay,
           numbersBeforeTurn: ahead,
+          numbersBeforeTurnLabel: getNumbersBeforeTurnLabel(ticket),
           afterYou: after,
           estimatedWait: wait,
           popupPriority: 3
@@ -779,13 +879,17 @@ function UserDashboard() {
           message: buildAiQueueMessage(ticket, ahead, wait),
           time: "Live",
           hasMetrics: typeof ahead === "number",
+          popupEligible: false,
           ticketNumber: ticket.ticket_number,
+          deptName: ticket.deptName,
+          laneType,
           nowServing,
+          assignedWindow: windowDisplay,
           numbersBeforeTurn: ahead,
+          numbersBeforeTurnLabel: getNumbersBeforeTurnLabel(ticket),
           afterYou: after,
           estimatedWait: wait,
-          popupPriority:
-            status === "Serving" || (typeof ahead === "number" && ahead <= 4) ? 2 : 5
+          popupPriority: 5
         });
       }
 
@@ -795,9 +899,19 @@ function UserDashboard() {
           category: "system",
           type: "system",
           title: "Queue Number Generated",
-          message: `Your queue number ${ticket.ticket_number} for ${ticket.deptName} has been created successfully.`,
+          message: `Your queue number ${ticket.ticket_number} for ${ticket.deptName} has been created successfully. Window will be assigned when staff calls your number.`,
           time: formatTimestampLabel(ticket.created_at),
-          hasMetrics: false,
+          hasMetrics: true,
+          popupEligible: false,
+          ticketNumber: ticket.ticket_number,
+          deptName: ticket.deptName,
+          laneType,
+          nowServing,
+          assignedWindow: windowDisplay,
+          numbersBeforeTurn: getPeopleAhead(ticket),
+          numbersBeforeTurnLabel: getNumbersBeforeTurnLabel(ticket),
+          afterYou: getPeopleAfter(ticket),
+          estimatedWait: getEstimatedWait(ticket),
           popupPriority: 6
         });
       }
@@ -817,6 +931,7 @@ function UserDashboard() {
           "Your priority request is still under review. Until approved, your queue lane remains under Regular.",
         time: "Live",
         hasMetrics: false,
+        popupEligible: false,
         popupPriority: 6
       });
     }
@@ -835,6 +950,7 @@ function UserDashboard() {
           "Your priority request has been approved. You may now use the Priority lane when joining a queue.",
         time: "Live",
         hasMetrics: false,
+        popupEligible: false,
         popupPriority: 6
       });
     }
@@ -853,6 +969,7 @@ function UserDashboard() {
           "Your priority request was rejected, so your queue access remains under the Regular lane.",
         time: "Live",
         hasMetrics: false,
+        popupEligible: false,
         popupPriority: 6
       });
     }
@@ -869,9 +986,12 @@ function UserDashboard() {
         message:
           officeQueue === 0
             ? `AI prediction: ${selectedDeptName} currently has no waiting users in the ${currentLaneType} lane. This is a good time to go now.`
-            : `AI prediction: ${selectedDeptName} currently has ${officeQueue} waiting ${officeQueue === 1 ? "person" : "people"} in the ${currentLaneType} lane. Estimated wait is ${officeWait}.`,
+            : `AI prediction: ${selectedDeptName} currently has ${officeQueue} waiting ${
+                officeQueue === 1 ? "person" : "people"
+              } in the ${currentLaneType} lane. Estimated wait is ${officeWait}.`,
         time: "Live",
         hasMetrics: false,
+        popupEligible: false,
         popupPriority: 7
       });
     }
@@ -917,12 +1037,9 @@ function UserDashboard() {
 
     const nextPopup = generatedNotifications.find(
       (item) =>
+        item.popupEligible === true &&
         !readNotificationIds.includes(item.id) &&
-        !dismissedPopupIds.includes(item.id) &&
-        (item.type === "turn" ||
-          item.type === "next" ||
-          item.type === "warning" ||
-          item.type === "ai")
+        !dismissedPopupIds.includes(item.id)
     );
 
     if (nextPopup) {
@@ -1076,6 +1193,13 @@ function UserDashboard() {
     );
   };
 
+  const renderWindowBox = (ticket) => (
+    <div className="qf-live-metric-box qf-window-highlight-box">
+      <span>Assigned Window</span>
+      <strong>{getWindowDisplay(ticket)}</strong>
+    </div>
+  );
+
   const renderHomeSection = () => (
     <>
       <section className="qf-top-hero">
@@ -1084,7 +1208,8 @@ function UserDashboard() {
           <h1>Hello, {displayName}</h1>
           <p>
             Monitor your queue in real time based on your assigned lane. This dashboard
-            shows exactly how many queue numbers are before your turn.
+            shows exactly how many queue numbers are before your turn and which window
+            to proceed to when called.
           </p>
         </div>
 
@@ -1132,6 +1257,11 @@ function UserDashboard() {
               <strong>{primaryLiveTicket.ticket_number}</strong>
             </div>
 
+            <div className="qf-live-instruction-card">
+              <span>Where to Go</span>
+              <strong>{getProceedInstruction(primaryLiveTicket)}</strong>
+            </div>
+
             <div className="qf-live-metrics-grid">
               <div className="qf-live-metric-box">
                 <span>Now Serving</span>
@@ -1143,13 +1273,15 @@ function UserDashboard() {
                 </strong>
               </div>
 
+              {renderWindowBox(primaryLiveTicket)}
+
               <div className="qf-live-metric-box">
-                <span>Numbers Before Turn</span>
+                <span>Queue Numbers Before Turn</span>
                 <strong>{getPeopleAhead(primaryLiveTicket)}</strong>
               </div>
 
               <div className="qf-live-metric-box">
-                <span>After You</span>
+                <span>People After You</span>
                 <strong>{getPeopleAfter(primaryLiveTicket)}</strong>
               </div>
 
@@ -1223,6 +1355,11 @@ function UserDashboard() {
                     <div className="qf-office-mini-info">
                       <span>Now Serving</span>
                       <strong>{nowServing}</strong>
+                    </div>
+
+                    <div className="qf-office-mini-info">
+                      <span>Assigned Window</span>
+                      <strong>When Called</strong>
                     </div>
 
                     <div className="qf-office-mini-info">
@@ -1306,16 +1443,38 @@ function UserDashboard() {
             ) : (
               <div className="qf-compact-ticket-list">
                 {activeTickets.map((ticket) => (
-                  <div key={ticket.id} className="qf-compact-ticket-item qf-compact-ticket-item-stack">
+                  <div
+                    key={ticket.id}
+                    className="qf-compact-ticket-item qf-compact-ticket-item-stack"
+                  >
                     <div className="qf-compact-ticket-top">
                       <div>
                         <h3>{ticket.deptName}</h3>
-                        <p>{ticket.ticket_number} • {ticket.lane_type || "Regular"} Lane</p>
+                        <p>
+                          {ticket.ticket_number} • {ticket.lane_type || "Regular"} Lane
+                        </p>
                       </div>
 
                       <span className={getStatusClass(ticket)}>
                         {getDisplayStatus(ticket)}
                       </span>
+                    </div>
+
+                    <div className="qf-compact-info-grid">
+                      <div>
+                        <span>Assigned Window</span>
+                        <strong>{getWindowDisplay(ticket)}</strong>
+                      </div>
+
+                      <div>
+                        <span>Before Turn</span>
+                        <strong>{getNumbersBeforeTurnLabel(ticket)}</strong>
+                      </div>
+
+                      <div>
+                        <span>Estimated Wait</span>
+                        <strong>{getEstimatedWait(ticket)}</strong>
+                      </div>
                     </div>
 
                     <div className="qf-compact-ticket-actions">
@@ -1353,13 +1512,28 @@ function UserDashboard() {
         </div>
 
         <div className="qf-notification-meta-box">
+          <span>Office</span>
+          <strong>{notificationItem.deptName || "-"}</strong>
+        </div>
+
+        <div className="qf-notification-meta-box">
+          <span>Lane</span>
+          <strong>{notificationItem.laneType || "-"}</strong>
+        </div>
+
+        <div className="qf-notification-meta-box">
+          <span>Assigned Window</span>
+          <strong>{notificationItem.assignedWindow || "-"}</strong>
+        </div>
+
+        <div className="qf-notification-meta-box">
           <span>Now Serving</span>
           <strong>{notificationItem.nowServing}</strong>
         </div>
 
         <div className="qf-notification-meta-box">
-          <span>Numbers Before Turn</span>
-          <strong>{notificationItem.numbersBeforeTurn}</strong>
+          <span>Before Turn</span>
+          <strong>{notificationItem.numbersBeforeTurnLabel}</strong>
         </div>
 
         <div className="qf-notification-meta-box">
@@ -1381,7 +1555,7 @@ function UserDashboard() {
         <div className="qf-panel-head qf-panel-head-no-margin">
           <div>
             <h2>Notifications</h2>
-            <p>AI-generated queue updates and live status notifications.</p>
+            <p>Important alerts, AI queue predictions, and system updates appear here.</p>
           </div>
         </div>
 
@@ -1397,7 +1571,9 @@ function UserDashboard() {
       <div className="qf-notification-filter-row">
         <button
           type="button"
-          className={`qf-notification-filter-pill ${notificationFilter === "all" ? "active" : ""}`}
+          className={`qf-notification-filter-pill ${
+            notificationFilter === "all" ? "active" : ""
+          }`}
           onClick={() => setNotificationFilter("all")}
         >
           All
@@ -1405,7 +1581,9 @@ function UserDashboard() {
 
         <button
           type="button"
-          className={`qf-notification-filter-pill ${notificationFilter === "queue" ? "active" : ""}`}
+          className={`qf-notification-filter-pill ${
+            notificationFilter === "queue" ? "active" : ""
+          }`}
           onClick={() => setNotificationFilter("queue")}
         >
           Queue
@@ -1413,7 +1591,9 @@ function UserDashboard() {
 
         <button
           type="button"
-          className={`qf-notification-filter-pill ${notificationFilter === "system" ? "active" : ""}`}
+          className={`qf-notification-filter-pill ${
+            notificationFilter === "system" ? "active" : ""
+          }`}
           onClick={() => setNotificationFilter("system")}
         >
           System
@@ -1466,7 +1646,7 @@ function UserDashboard() {
       <div className="qf-panel-head">
         <div>
           <h2>History</h2>
-          <p>Track your past and current queue activities.</p>
+          <p>Track your past and current queue activities with complete queue details.</p>
         </div>
       </div>
 
@@ -1481,7 +1661,9 @@ function UserDashboard() {
 
         <button
           type="button"
-          className={`qf-notification-filter-pill ${historyFilter === "active" ? "active" : ""}`}
+          className={`qf-notification-filter-pill ${
+            historyFilter === "active" ? "active" : ""
+          }`}
           onClick={() => setHistoryFilter("active")}
         >
           Active
@@ -1489,7 +1671,9 @@ function UserDashboard() {
 
         <button
           type="button"
-          className={`qf-notification-filter-pill ${historyFilter === "completed" ? "active" : ""}`}
+          className={`qf-notification-filter-pill ${
+            historyFilter === "completed" ? "active" : ""
+          }`}
           onClick={() => setHistoryFilter("completed")}
         >
           Completed
@@ -1508,23 +1692,48 @@ function UserDashboard() {
               <div className="qf-history-head">
                 <div>
                   <h3>{ticket.deptName}</h3>
-                  <p>{ticket.ticket_number}</p>
+                  <p>
+                    {ticket.ticket_number} • {ticket.lane_type || "Regular"} Lane
+                  </p>
                 </div>
 
-                <span className={getStatusClass(ticket)}>
-                  {getDisplayStatus(ticket)}
-                </span>
+                <span className={getStatusClass(ticket)}>{getDisplayStatus(ticket)}</span>
+              </div>
+
+              <div className="qf-history-instruction">
+                <span>Queue Position Details</span>
+                <strong>{getNumbersBeforeTurnLabel(ticket)}</strong>
               </div>
 
               <div className="qf-history-meta">
+                <div>
+                  <span>Office</span>
+                  <strong>{ticket.deptName}</strong>
+                </div>
+
+                <div>
+                  <span>Queue Number</span>
+                  <strong>{ticket.ticket_number}</strong>
+                </div>
+
                 <div>
                   <span>Lane</span>
                   <strong>{ticket.lane_type || "Regular"}</strong>
                 </div>
 
                 <div>
-                  <span>Numbers Before Turn</span>
+                  <span>Assigned Window</span>
+                  <strong>{getWindowDisplay(ticket)}</strong>
+                </div>
+
+                <div>
+                  <span>Queue Numbers Before Turn</span>
                   <strong>{getNumbersBeforeTurn(ticket)}</strong>
+                </div>
+
+                <div>
+                  <span>People After You</span>
+                  <strong>{getPeopleAfter(ticket)}</strong>
                 </div>
 
                 <div>
@@ -1578,18 +1787,21 @@ function UserDashboard() {
                 </div>
               </div>
 
-              {ticket.status !== "Done" && ticket.status !== "Serving" && (
-                <div className="qf-history-action-row">
-                  <button
-                    type="button"
-                    className="qf-danger-btn"
-                    onClick={() => handleCancelTicket(ticket)}
-                    disabled={cancelLoadingId === ticket.id}
-                  >
-                    {cancelLoadingId === ticket.id ? "Cancelling..." : "Cancel Queue"}
-                  </button>
-                </div>
-              )}
+              {ticket.status !== "Done" &&
+                ticket.status !== "Serving" &&
+                ticket.status !== "Cancelled" &&
+                ticket.status !== "Reset" && (
+                  <div className="qf-history-action-row">
+                    <button
+                      type="button"
+                      className="qf-danger-btn"
+                      onClick={() => handleCancelTicket(ticket)}
+                      disabled={cancelLoadingId === ticket.id}
+                    >
+                      {cancelLoadingId === ticket.id ? "Cancelling..." : "Cancel Queue"}
+                    </button>
+                  </div>
+                )}
             </div>
           ))}
         </div>
@@ -1610,7 +1822,7 @@ function UserDashboard() {
         <div className="qf-setting-card">
           <div>
             <strong>Queue Alerts</strong>
-            <p>Receive notifications when your turn gets closer in the queue.</p>
+            <p>Receive important notifications when your turn gets closer in the queue.</p>
           </div>
 
           <label className="qf-switch">
@@ -1626,7 +1838,7 @@ function UserDashboard() {
         <div className="qf-setting-card">
           <div>
             <strong>AI Notifications</strong>
-            <p>Receive AI-based predictions like turn approaching and queue movement updates.</p>
+            <p>Receive AI-based predictions inside the notifications panel.</p>
           </div>
 
           <label className="qf-switch">
@@ -1642,7 +1854,7 @@ function UserDashboard() {
         <div className="qf-setting-card">
           <div>
             <strong>System Announcements</strong>
-            <p>Show general queue creation and status announcements.</p>
+            <p>Show general queue creation and priority status announcements.</p>
           </div>
 
           <label className="qf-switch">
@@ -1658,7 +1870,7 @@ function UserDashboard() {
         <div className="qf-setting-card">
           <div>
             <strong>Sound Notifications</strong>
-            <p>Play a short sound when a new AI notification appears.</p>
+            <p>Play a short alert sound when an important popup notification appears.</p>
           </div>
 
           <label className="qf-switch">
@@ -1798,16 +2010,23 @@ function UserDashboard() {
 
   return (
     <div className="qf-app-layout-drawer">
-      <button
-        className="qf-hamburger"
-        onClick={() => setSidebarOpen(true)}
-        type="button"
-        aria-label="Open menu"
-      >
-        <span></span>
-        <span></span>
-        <span></span>
-      </button>
+      <div className="qf-user-local-header">
+        <button
+          className="qf-hamburger"
+          onClick={() => setSidebarOpen(true)}
+          type="button"
+          aria-label="Open menu"
+        >
+          <span></span>
+          <span></span>
+          <span></span>
+        </button>
+
+        <div className="qf-user-local-brand">
+          <strong>QueueFree</strong>
+          <span>User Dashboard</span>
+        </div>
+      </div>
 
       <aside className={`qf-drawer ${sidebarOpen ? "open" : ""}`}>
         <div className="qf-drawer-top">
@@ -1852,9 +2071,7 @@ function UserDashboard() {
               <span className="qf-menu-link-content">
                 <span>{item.label}</span>
 
-                {item.badge > 0 && (
-                  <span className="qf-menu-badge">{item.badge}</span>
-                )}
+                {item.badge > 0 && <span className="qf-menu-badge">{item.badge}</span>}
               </span>
             </button>
           ))}
@@ -1862,17 +2079,25 @@ function UserDashboard() {
       </aside>
 
       {sidebarOpen && (
-        <div
-          className="qf-sidebar-overlay"
-          onClick={() => setSidebarOpen(false)}
-        ></div>
+        <div className="qf-sidebar-overlay" onClick={() => setSidebarOpen(false)}></div>
       )}
 
       {popupNotification && activeSection !== "notifications" && (
         <div className="qf-ai-popup">
           <div className={`qf-ai-popup-card qf-notification-${popupNotification.type}`}>
+            <button
+              type="button"
+              className="qf-ai-popup-close"
+              onClick={dismissPopupNotification}
+              aria-label="Close notification"
+            >
+              ✕
+            </button>
+
             <div className="qf-ai-popup-left">
-              <div className="qf-ai-popup-badge">AI</div>
+              <div className="qf-ai-popup-badge">
+                {popupNotification.type === "turn" ? "NOW" : "ALERT"}
+              </div>
 
               <div>
                 <h3>{popupNotification.title}</h3>
@@ -1885,6 +2110,11 @@ function UserDashboard() {
                 <div className="qf-ai-popup-mini-box">
                   <span>Ticket</span>
                   <strong>{popupNotification.ticketNumber}</strong>
+                </div>
+
+                <div className="qf-ai-popup-mini-box">
+                  <span>Window</span>
+                  <strong>{popupNotification.assignedWindow}</strong>
                 </div>
 
                 <div className="qf-ai-popup-mini-box">
@@ -1916,15 +2146,7 @@ function UserDashboard() {
                   markNotificationAsRead(popupNotification.id);
                 }}
               >
-                View
-              </button>
-
-              <button
-                type="button"
-                className="qf-ai-popup-close"
-                onClick={dismissPopupNotification}
-              >
-                ✕
+                View Details
               </button>
             </div>
           </div>
