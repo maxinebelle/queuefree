@@ -9,6 +9,7 @@ import {
   onSnapshot,
   query,
   serverTimestamp,
+  setDoc,
   updateDoc,
   where
 } from "firebase/firestore";
@@ -47,11 +48,77 @@ function StaffDashboard() {
     return DEPARTMENT_NAMES;
   }, [assignedOffice]);
 
+  const getStaffWindowDocId = (officeName, windowName) => {
+    const safeOffice = String(officeName || "UnknownOffice")
+      .trim()
+      .replace(/\s+/g, "_")
+      .replace(/[^a-zA-Z0-9_-]/g, "");
+
+    const safeWindow = String(windowName || "Window_1")
+      .trim()
+      .replace(/\s+/g, "_")
+      .replace(/[^a-zA-Z0-9_-]/g, "");
+
+    return `${safeOffice}_${safeWindow}`;
+  };
+
+  const syncStaffWindowRecord = async () => {
+    try {
+      if (!currentUser?.uid) return;
+
+      const officeValue = assignedOffice || selectedDeptName;
+      const windowValue = assignedWindow || "Window 1";
+
+      if (!officeValue || !windowValue) return;
+
+      const staffWindowId = getStaffWindowDocId(officeValue, windowValue);
+
+      await setDoc(
+        doc(db, "staff_windows", staffWindowId),
+        {
+          office_assignment: officeValue,
+          window_assignment: windowValue,
+          staff_uid: currentUser.uid,
+          staff_name: staffDisplayName,
+          is_active: true,
+          account_status: currentUser?.account_status || "active",
+          updated_at: serverTimestamp()
+        },
+        { merge: true }
+      );
+    } catch (error) {
+      console.error("SYNC STAFF WINDOW ERROR:", error);
+    }
+  };
+
+  useEffect(() => {
+    const openSidebar = () => {
+      setSidebarOpen(true);
+    };
+
+    window.addEventListener("queuefree-open-sidebar", openSidebar);
+
+    return () => {
+      window.removeEventListener("queuefree-open-sidebar", openSidebar);
+    };
+  }, []);
+
   useEffect(() => {
     if (assignedOffice && DEPARTMENT_NAMES.includes(assignedOffice)) {
       setSelectedDeptName(assignedOffice);
     }
   }, [assignedOffice]);
+
+  useEffect(() => {
+    syncStaffWindowRecord();
+  }, [
+    currentUser?.uid,
+    currentUser?.account_status,
+    assignedOffice,
+    assignedWindow,
+    selectedDeptName,
+    staffDisplayName
+  ]);
 
   useEffect(() => {
     const unsubscribers = DEPARTMENT_NAMES.map((deptName) => {
@@ -231,22 +298,6 @@ function StaffDashboard() {
     [pendingTickets]
   );
 
-  const nextPriorityTicket = useMemo(() => {
-    const copy = [...pendingPriorityTickets];
-    copy.sort((a, b) => (a.lane_number || 0) - (b.lane_number || 0));
-    return copy[0] || null;
-  }, [pendingPriorityTickets]);
-
-  const nextRegularTicket = useMemo(() => {
-    const copy = [...pendingRegularTickets];
-    copy.sort((a, b) => (a.lane_number || 0) - (b.lane_number || 0));
-    return copy[0] || null;
-  }, [pendingRegularTickets]);
-
-  const nextUpTicket = useMemo(() => {
-    return nextPriorityTicket || nextRegularTicket || null;
-  }, [nextPriorityTicket, nextRegularTicket]);
-
   const currentServingTicket = useMemo(() => {
     return servingTickets[0] || null;
   }, [servingTickets]);
@@ -273,11 +324,6 @@ function StaffDashboard() {
     if (/^[A-Z]P?000$/i.test(text)) return "-";
 
     return text;
-  };
-
-  const getAverageWaitMinutes = () => {
-    const avg = selectedDept?.avg_service_time || 0;
-    return `${avg} min`;
   };
 
   const getReadableDateTime = (value) => {
@@ -372,7 +418,12 @@ function StaffDashboard() {
   };
 
   const getWindowLabel = (ticket) => {
-    return ticket?.window_assignment || assignedWindow || "Window 1";
+    return (
+      ticket?.window_assignment ||
+      ticket?.assigned_window ||
+      assignedWindow ||
+      "Window 1"
+    );
   };
 
   const updateDepartmentServingDisplay = async (ticketData) => {
@@ -439,13 +490,13 @@ function StaffDashboard() {
       if (processingNext) return;
 
       if (currentServingTicket) {
-        alert(
-          "Please finish the current serving ticket first before calling the next one."
-        );
+        alert("Please finish the current serving ticket first before calling the next one.");
         return;
       }
 
       setProcessingNext(true);
+
+      await syncStaffWindowRecord();
 
       const pendingQuery = query(
         collection(db, "queue_tickets"),
@@ -480,23 +531,18 @@ function StaffDashboard() {
         status: "Serving",
         called_at: serverTimestamp(),
         window_assignment: assignedWindow || "Window 1",
+        assigned_window: assignedWindow || "Window 1",
         served_by: currentUser?.uid || ""
       });
 
       await updateDepartmentServingDisplay(nextTicket);
 
-      alert(
-        `Now serving: ${nextTicket.ticket_number} at ${
-          assignedWindow || "Window 1"
-        }`
-      );
+      alert(`Now serving: ${nextTicket.ticket_number} at ${assignedWindow || "Window 1"}`);
     } catch (error) {
       console.error("CALL NEXT ERROR:", error);
 
       if (error.code === "permission-denied") {
-        alert(
-          "Failed to call next ticket because Firestore rules blocked the update."
-        );
+        alert("Failed to call next ticket because Firestore rules blocked the update.");
         return;
       }
 
@@ -521,6 +567,8 @@ function StaffDashboard() {
       if (processingFinish) return;
 
       setProcessingFinish(true);
+
+      await syncStaffWindowRecord();
 
       const endTime = new Date();
       let durationSec = 0;
@@ -567,9 +615,7 @@ function StaffDashboard() {
       console.error("FINISH CURRENT ERROR:", error);
 
       if (error.code === "permission-denied") {
-        alert(
-          "Failed to finish current ticket because Firestore rules blocked the update."
-        );
+        alert("Failed to finish current ticket because Firestore rules blocked the update.");
         return;
       }
 
@@ -590,9 +636,13 @@ function StaffDashboard() {
 
       setProcessingPause(true);
 
+      await syncStaffWindowRecord();
+
       await updateDoc(doc(db, "queue_tickets", currentServingTicket.id), {
         status: "Paused",
-        paused_at: serverTimestamp()
+        paused_at: serverTimestamp(),
+        window_assignment: assignedWindow || "Window 1",
+        assigned_window: assignedWindow || "Window 1"
       });
 
       await clearDepartmentServingDisplay(currentServingTicket);
@@ -602,9 +652,7 @@ function StaffDashboard() {
       console.error("PAUSE CURRENT ERROR:", error);
 
       if (error.code === "permission-denied") {
-        alert(
-          "Failed to pause current ticket because Firestore rules blocked the update."
-        );
+        alert("Failed to pause current ticket because Firestore rules blocked the update.");
         return;
       }
 
@@ -619,9 +667,7 @@ function StaffDashboard() {
       if (!ticket) return;
 
       if (currentServingTicket) {
-        alert(
-          "Finish the currently serving ticket first before resuming another ticket."
-        );
+        alert("Finish the currently serving ticket first before resuming another ticket.");
         return;
       }
 
@@ -629,10 +675,13 @@ function StaffDashboard() {
 
       setProcessingResume(true);
 
+      await syncStaffWindowRecord();
+
       await updateDoc(doc(db, "queue_tickets", ticket.id), {
         status: "Serving",
         resumed_at: serverTimestamp(),
         window_assignment: assignedWindow || "Window 1",
+        assigned_window: assignedWindow || "Window 1",
         served_by: currentUser?.uid || ""
       });
 
@@ -643,9 +692,7 @@ function StaffDashboard() {
       console.error("RESUME PAUSED ERROR:", error);
 
       if (error.code === "permission-denied") {
-        alert(
-          "Failed to resume paused ticket because Firestore rules blocked the update."
-        );
+        alert("Failed to resume paused ticket because Firestore rules blocked the update.");
         return;
       }
 
@@ -675,10 +722,11 @@ function StaffDashboard() {
       <section className="qf-staff-hero">
         <div className="qf-staff-hero-left">
           <div className="qf-staff-badge">STAFF CONTROL PANEL</div>
+
           <h1>{selectedDeptName} Queue Operations</h1>
           <p>
-            Monitor live queue flow, serve the next ticket correctly, and guide
-            users to the assigned service window.
+            Monitor live queue flow, serve the next ticket correctly, and guide users
+            to the assigned service window.
           </p>
         </div>
 
@@ -798,9 +846,7 @@ function StaffDashboard() {
           </div>
 
           {!currentServingTicket ? (
-            <div className="qf-staff-empty-box">
-              No ticket currently being served.
-            </div>
+            <div className="qf-staff-empty-box">No ticket currently being served.</div>
           ) : (
             <div className="qf-staff-live-serving-card">
               <div className="qf-staff-ticket-top">
@@ -876,6 +922,11 @@ function StaffDashboard() {
                     </div>
 
                     <div className="qf-staff-meta-box">
+                      <span>Assigned Window</span>
+                      <strong>{getWindowLabel(ticket)}</strong>
+                    </div>
+
+                    <div className="qf-staff-meta-box">
                       <span>Queue Position</span>
                       <strong>{getQueuePositionLabel(ticket)}</strong>
                     </div>
@@ -912,7 +963,7 @@ function StaffDashboard() {
           <h2>Queue Control</h2>
           <p>
             Priority tickets appear before regular tickets. The assigned window is
-            shown when a ticket is called.
+            already visible to users once they generate a queue number.
           </p>
         </div>
       </div>
@@ -944,9 +995,7 @@ function StaffDashboard() {
           <div className="qf-staff-section-title">Priority Queue</div>
 
           {pendingPriorityTickets.length === 0 ? (
-            <div className="qf-staff-empty-box">
-              No pending priority tickets.
-            </div>
+            <div className="qf-staff-empty-box">No pending priority tickets.</div>
           ) : (
             <div className="qf-staff-ticket-list">
               {pendingPriorityTickets.map((ticket) => (
@@ -990,7 +1039,7 @@ function StaffDashboard() {
 
                     <div className="qf-staff-meta-box">
                       <span>Assigned Window</span>
-                      <strong>{ticket.window_assignment || "Not called yet"}</strong>
+                      <strong>{getWindowLabel(ticket)}</strong>
                     </div>
 
                     <div className="qf-staff-meta-box">
@@ -1052,7 +1101,7 @@ function StaffDashboard() {
 
                     <div className="qf-staff-meta-box">
                       <span>Assigned Window</span>
-                      <strong>{ticket.window_assignment || "Not called yet"}</strong>
+                      <strong>{getWindowLabel(ticket)}</strong>
                     </div>
 
                     <div className="qf-staff-meta-box">
@@ -1074,7 +1123,10 @@ function StaffDashboard() {
       <div className="qf-staff-panel-head">
         <div>
           <h2>Completed Records</h2>
-          <p>Finished tickets and reset-cleared tickets handled inside the selected department.</p>
+          <p>
+            Finished tickets and reset-cleared tickets handled inside the selected
+            department.
+          </p>
         </div>
       </div>
 
@@ -1108,7 +1160,7 @@ function StaffDashboard() {
 
                 <div className="qf-staff-meta-box">
                   <span>Assigned Window</span>
-                  <strong>{ticket.window_assignment || "-"}</strong>
+                  <strong>{getWindowLabel(ticket)}</strong>
                 </div>
 
                 <div className="qf-staff-meta-box">
@@ -1153,19 +1205,6 @@ function StaffDashboard() {
 
   return (
     <div className="qf-staff-layout">
-      {!sidebarOpen && (
-        <button
-          className="qf-staff-hamburger"
-          onClick={() => setSidebarOpen(true)}
-          type="button"
-          aria-label="Open menu"
-        >
-          <span></span>
-          <span></span>
-          <span></span>
-        </button>
-      )}
-
       <aside className={`qf-staff-drawer ${sidebarOpen ? "open" : ""}`}>
         <div className="qf-staff-drawer-top">
           <div className="qf-staff-drawer-brand">QueueFree</div>

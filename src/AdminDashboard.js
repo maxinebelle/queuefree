@@ -12,6 +12,7 @@ import {
   getDocs,
   onSnapshot,
   query,
+  serverTimestamp,
   setDoc,
   updateDoc,
   where,
@@ -37,7 +38,6 @@ function AdminDashboard() {
 
   const [staffAssignments, setStaffAssignments] = useState({});
   const [staffWindowAssignments, setStaffWindowAssignments] = useState({});
-
   const [proofPreviewUser, setProofPreviewUser] = useState(null);
 
   const [newStaff, setNewStaff] = useState({
@@ -53,6 +53,21 @@ function AdminDashboard() {
     `${currentUser?.first_name || ""} ${currentUser?.last_name || ""}`.trim() ||
     currentUser?.email?.split("@")[0] ||
     "Admin";
+
+  useEffect(() => {
+    const openSidebarFromGlobalHeader = () => {
+      setSidebarOpen(true);
+    };
+
+    window.addEventListener("queuefree-open-sidebar", openSidebarFromGlobalHeader);
+
+    return () => {
+      window.removeEventListener(
+        "queuefree-open-sidebar",
+        openSidebarFromGlobalHeader
+      );
+    };
+  }, []);
 
   function getReadableDateTime(value) {
     if (value?.toDate) {
@@ -100,7 +115,92 @@ function AdminDashboard() {
     if (status === "Serving") return "qf-admin-status qf-admin-status-serving";
     if (status === "Done") return "qf-admin-status qf-admin-status-done";
     if (status === "Paused") return "qf-admin-status qf-admin-status-paused";
+    if (status === "Reset") return "qf-admin-status qf-admin-status-done";
+    if (status === "Cancelled") return "qf-admin-status qf-admin-status-done";
     return "qf-admin-status qf-admin-status-pending";
+  }
+
+  function normalizeNowServingDisplay(value) {
+    if (!value) return "-";
+
+    const text = String(value).trim();
+
+    if (text === "0") return "-";
+    if (/^[A-Z]P?000$/i.test(text)) return "-";
+
+    return text;
+  }
+
+  function getStaffWindowDocId(officeName, windowName) {
+    const safeOffice = String(officeName || "Office")
+      .trim()
+      .replace(/\s+/g, "_");
+
+    const safeWindow = String(windowName || "Window_1")
+      .trim()
+      .replace(/\s+/g, "_");
+
+    return `${safeOffice}_${safeWindow}`;
+  }
+
+  async function syncStaffWindowRecord({
+    staffUid,
+    staffName,
+    staffEmail,
+    officeAssignment,
+    windowAssignment,
+    isActive,
+    accountStatus
+  }) {
+    if (!staffUid || !officeAssignment || !windowAssignment) return;
+
+    const docId = getStaffWindowDocId(officeAssignment, windowAssignment);
+    const staffWindowRef = doc(db, "staff_windows", docId);
+
+    await setDoc(
+      staffWindowRef,
+      {
+        office_assignment: officeAssignment,
+        window_assignment: windowAssignment,
+        staff_uid: staffUid,
+        staff_name: staffName || "Staff",
+        staff_email: staffEmail || "",
+        is_active: isActive === true,
+        account_status: accountStatus || "active",
+        updated_at: serverTimestamp()
+      },
+      { merge: true }
+    );
+  }
+
+  async function deactivateOldStaffWindowRecord(staffUser, newOffice, newWindow) {
+    const oldOffice = staffUser?.office_assignment || "";
+    const oldWindow = staffUser?.window_assignment || "";
+
+    if (!staffUser?.id || !oldOffice || !oldWindow) return;
+
+    const officeChanged = oldOffice !== newOffice;
+    const windowChanged = oldWindow !== newWindow;
+
+    if (!officeChanged && !windowChanged) return;
+
+    const oldDocId = getStaffWindowDocId(oldOffice, oldWindow);
+    const oldStaffWindowRef = doc(db, "staff_windows", oldDocId);
+
+    await setDoc(
+      oldStaffWindowRef,
+      {
+        office_assignment: oldOffice,
+        window_assignment: oldWindow,
+        staff_uid: staffUser.id,
+        staff_name: getFullName(staffUser),
+        staff_email: staffUser.email || "",
+        is_active: false,
+        account_status: staffUser.account_status || "active",
+        updated_at: serverTimestamp()
+      },
+      { merge: true }
+    );
   }
 
   function downloadCsv(filename, rows) {
@@ -521,8 +621,8 @@ function AdminDashboard() {
         Regular: counts.regular,
         Priority: counts.priority,
         Total: counts.total,
-        RegularNowServing: dept.regular_now_serving_display || "-",
-        PriorityNowServing: dept.priority_now_serving_display || "-"
+        RegularNowServing: normalizeNowServingDisplay(dept.regular_now_serving_display),
+        PriorityNowServing: normalizeNowServingDisplay(dept.priority_now_serving_display)
       };
     });
 
@@ -536,7 +636,7 @@ function AdminDashboard() {
       Department: item.dept_name || getDepartmentNameById(item.dept_id),
       Lane: item.lane_type || "Regular",
       Window: item.window_assignment || "-",
-      ServedBy: item.served_by || "-",
+      ServedBy: item.served_by_name || item.served_by || "-",
       DurationSeconds: item.duration_sec || 0,
       EndTime: getReadableDateTime(item.end_time)
     }));
@@ -611,14 +711,17 @@ function AdminDashboard() {
       batch.update(deptRef, {
         current_number: 0,
         current_serving_display: "-",
+        current_serving_window: "",
         last_number: 0,
         now_serving: 0,
         priority_last_number: 0,
         priority_now_serving_number: 0,
         priority_now_serving_display: "-",
+        priority_now_serving_window: "",
         regular_last_number: 0,
         regular_now_serving_number: 0,
-        regular_now_serving_display: "-"
+        regular_now_serving_display: "-",
+        regular_now_serving_window: ""
       });
 
       ticketSnapshot.docs.forEach((ticketDoc) => {
@@ -630,7 +733,7 @@ function AdminDashboard() {
           ticketData.status !== "Reset"
         ) {
           batch.update(ticketDoc.ref, {
-            status: "Done",
+            status: "Reset",
             reset_by_admin: true,
             reset_at: new Date(),
             completed_at: ticketData.completed_at || new Date()
@@ -698,9 +801,23 @@ function AdminDashboard() {
 
       setAdminLoading(true);
 
+      await deactivateOldStaffWindowRecord(staffUser, officeValue, windowValue);
+
       await updateDoc(doc(db, "users", staffUser.id), {
         office_assignment: officeValue,
         window_assignment: windowValue
+      });
+
+      await syncStaffWindowRecord({
+        staffUid: staffUser.id,
+        staffName: getFullName(staffUser),
+        staffEmail: staffUser.email || "",
+        officeAssignment: officeValue,
+        windowAssignment: windowValue,
+        isActive:
+          staffUser.is_deleted !== true &&
+          (staffUser.account_status || "active") === "active",
+        accountStatus: staffUser.account_status || "active"
       });
 
       alert("Staff assignment updated successfully.");
@@ -720,6 +837,17 @@ function AdminDashboard() {
         account_status: nextStatus
       });
 
+      await syncStaffWindowRecord({
+        staffUid: staffUser.id,
+        staffName: getFullName(staffUser),
+        staffEmail: staffUser.email || "",
+        officeAssignment: staffUser.office_assignment || staffAssignments[staffUser.id],
+        windowAssignment:
+          staffUser.window_assignment || staffWindowAssignments[staffUser.id] || "Window 1",
+        isActive: staffUser.is_deleted !== true && nextStatus === "active",
+        accountStatus: nextStatus
+      });
+
       alert(`Staff account is now ${nextStatus}.`);
     } catch (error) {
       console.error("STAFF STATUS CHANGE ERROR:", error);
@@ -733,8 +861,22 @@ function AdminDashboard() {
     try {
       setAdminLoading(true);
 
+      const nextDeleted = !(staffUser.is_deleted === true);
+      const currentStatus = staffUser.account_status || "active";
+
       await updateDoc(doc(db, "users", staffUser.id), {
-        is_deleted: !(staffUser.is_deleted === true)
+        is_deleted: nextDeleted
+      });
+
+      await syncStaffWindowRecord({
+        staffUid: staffUser.id,
+        staffName: getFullName(staffUser),
+        staffEmail: staffUser.email || "",
+        officeAssignment: staffUser.office_assignment || staffAssignments[staffUser.id],
+        windowAssignment:
+          staffUser.window_assignment || staffWindowAssignments[staffUser.id] || "Window 1",
+        isActive: nextDeleted !== true && currentStatus === "active",
+        accountStatus: currentStatus
       });
 
       alert(
@@ -835,6 +977,7 @@ function AdminDashboard() {
       );
 
       const staffUid = staffCredential.user.uid;
+      const staffName = `${firstName} ${lastName}`.trim();
 
       await setDoc(doc(db, "users", staffUid), {
         first_name: firstName,
@@ -854,6 +997,16 @@ function AdminDashboard() {
         account_status: "active",
         is_deleted: false,
         created_at: new Date()
+      });
+
+      await syncStaffWindowRecord({
+        staffUid,
+        staffName,
+        staffEmail: email,
+        officeAssignment,
+        windowAssignment,
+        isActive: true,
+        accountStatus: "active"
       });
 
       await signOut(auth);
@@ -934,8 +1087,33 @@ function AdminDashboard() {
     </div>
   );
 
+  const renderAdminOverviewCard = () => (
+    <section className="qf-admin-header-card">
+      <div className="qf-admin-header-row">
+        <div className="qf-admin-header-brand-line">
+          <div className="qf-admin-header-top">
+            <p className="qf-admin-mini">QUEUEFREE • UCLM</p>
+            <h1>Admin Dashboard</h1>
+            <p className="qf-admin-subtitle">
+              System management overview for offices, users, queue operations,
+              priority requests, and generated reports.
+            </p>
+          </div>
+        </div>
+
+        <div className="qf-admin-top-user">
+          <div className="qf-admin-user-chip">{displayName}</div>
+        </div>
+      </div>
+
+      {renderHeaderStats()}
+    </section>
+  );
+
   const renderOfficesSection = () => (
     <div className="qf-admin-content-grid">
+      {renderAdminOverviewCard()}
+
       <div className="qf-admin-section-card">
         <div className="qf-admin-section-headline">
           <h2>Offices</h2>
@@ -1003,12 +1181,16 @@ function AdminDashboard() {
                 <div className="qf-admin-office-serving">
                   <div className="qf-admin-serving-box">
                     <span>Regular Now Serving</span>
-                    <strong>{dept.regular_now_serving_display || "-"}</strong>
+                    <strong>
+                      {normalizeNowServingDisplay(dept.regular_now_serving_display)}
+                    </strong>
                   </div>
 
                   <div className="qf-admin-serving-box priority">
                     <span>Priority Now Serving</span>
-                    <strong>{dept.priority_now_serving_display || "-"}</strong>
+                    <strong>
+                      {normalizeNowServingDisplay(dept.priority_now_serving_display)}
+                    </strong>
                   </div>
                 </div>
 
@@ -1087,6 +1269,16 @@ function AdminDashboard() {
           <div className="qf-admin-analytics-chip">
             <span>Priority</span>
             <strong>{totalPriority}</strong>
+          </div>
+
+          <div className="qf-admin-analytics-chip">
+            <span>Regular</span>
+            <strong>{totalRegular}</strong>
+          </div>
+
+          <div className="qf-admin-analytics-chip">
+            <span>Transactions</span>
+            <strong>{transactions.length}</strong>
           </div>
 
           <div className="qf-admin-analytics-chip">
@@ -2038,39 +2230,6 @@ function AdminDashboard() {
 
   return (
     <div className="qf-admin-layout">
-      {!sidebarOpen && (
-        <button
-          className="qf-admin-corner-menu-btn"
-          onClick={() => setSidebarOpen(true)}
-          type="button"
-          aria-label="Open menu"
-        >
-          <span></span>
-          <span></span>
-          <span></span>
-        </button>
-      )}
-
-      <main className="qf-admin-main">
-        <section className="qf-admin-header-card">
-          <div className="qf-admin-header-row">
-            <div className="qf-admin-header-top">
-              <p className="qf-admin-mini">QUEUEFREE • UCLM</p>
-              <h1>Admin Dashboard</h1>
-              <p className="qf-admin-subtitle">System Management</p>
-            </div>
-
-            <div className="qf-admin-top-user">
-              <div className="qf-admin-user-chip">{displayName}</div>
-            </div>
-          </div>
-
-          {renderHeaderStats()}
-        </section>
-
-        {renderActiveSection()}
-      </main>
-
       <aside className={`qf-admin-drawer ${sidebarOpen ? "open" : ""}`}>
         <div className="qf-admin-drawer-top">
           <div className="qf-admin-drawer-brand">QueueFree</div>
@@ -2121,6 +2280,8 @@ function AdminDashboard() {
           onClick={() => setSidebarOpen(false)}
         ></div>
       )}
+
+      <main className="qf-admin-main">{renderActiveSection()}</main>
 
       {renderProofModal()}
     </div>
