@@ -26,6 +26,7 @@ function UserDashboard() {
   const [myTickets, setMyTickets] = useState([]);
   const [allTickets, setAllTickets] = useState([]);
   const [staffWindows, setStaffWindows] = useState([]);
+  const [officePredictionStats, setOfficePredictionStats] = useState([]);
   const [activeSection, setActiveSection] = useState("home");
   const [sidebarOpen, setSidebarOpen] = useState(false);
 
@@ -173,6 +174,26 @@ function UserDashboard() {
   }, []);
 
   useEffect(() => {
+    const unsubscribe = onSnapshot(
+      collection(db, "office_prediction_stats"),
+      (snapshot) => {
+        const data = snapshot.docs.map((docSnap) => ({
+          id: docSnap.id,
+          ...docSnap.data()
+        }));
+
+        setOfficePredictionStats(data);
+      },
+      (error) => {
+        console.error("Office prediction stats listener error:", error);
+        setOfficePredictionStats([]);
+      }
+    );
+
+    return () => unsubscribe();
+  }, []);
+
+  useEffect(() => {
     if (!currentUser?.uid) return;
 
     const unsubscribe = onSnapshot(
@@ -296,6 +317,20 @@ function UserDashboard() {
     return effectiveLaneDetails.laneType;
   }, [effectiveLaneDetails]);
 
+  const getPredictionStatDocId = (officeName, laneType) => {
+    const safeOffice = String(officeName || "Office")
+      .trim()
+      .replace(/\s+/g, "_")
+      .replace(/[^a-zA-Z0-9_-]/g, "");
+
+    const safeLane = String(laneType || "Regular")
+      .trim()
+      .replace(/\s+/g, "_")
+      .replace(/[^a-zA-Z0-9_-]/g, "");
+
+    return `${safeOffice}_${safeLane}`;
+  };
+
   const getActiveStaffWindowsByDept = (deptName) => {
     const windows = staffWindows
       .filter(
@@ -312,6 +347,43 @@ function UserDashboard() {
       const bNumber = Number(String(b).replace(/\D/g, "")) || 0;
       return aNumber - bNumber;
     });
+  };
+
+  const getPredictionStats = (deptName, laneType) => {
+    const docId = getPredictionStatDocId(deptName, laneType);
+
+    const foundById = officePredictionStats.find((item) => item.id === docId);
+
+    if (foundById) {
+      return foundById;
+    }
+
+    const foundByFields = officePredictionStats.find(
+      (item) =>
+        (item.dept_name || "") === deptName &&
+        (item.lane_type || "Regular") === laneType
+    );
+
+    if (foundByFields) {
+      return foundByFields;
+    }
+
+    const dept = departmentData[deptName];
+    const pendingCount = getLanePendingCountByDept(deptName);
+    const avgServiceMinutes = Number(dept?.avg_service_time || 5);
+    const activeWindows = Math.max(getActiveStaffWindowsByDept(deptName).length, 1);
+
+    return {
+      dept_name: deptName,
+      lane_type: laneType,
+      avg_service_minutes: avgServiceMinutes,
+      active_windows: activeWindows,
+      pending_count: pendingCount,
+      predicted_wait_minutes: Math.ceil((pendingCount * avgServiceMinutes) / activeWindows),
+      confidence_score: 0.65,
+      prediction_method: "local fallback prediction",
+      is_active: dept?.is_active !== false
+    };
   };
 
   const getBestAssignedWindowForDept = (deptId, deptName, laneType) => {
@@ -428,10 +500,18 @@ function UserDashboard() {
   };
 
   const getEstimatedWaitMinutesValue = (ticket) => {
+    const laneType = ticket.lane_type || "Regular";
+    const predictionStats = getPredictionStats(ticket.deptName, laneType);
+
     const dept = departmentData[ticket.deptName];
     const avgServiceTime = Number(
-      dept?.avg_service_time || ticket.avg_service_time_snapshot || 0
+      predictionStats?.avg_service_minutes ||
+        dept?.avg_service_time ||
+        ticket.avg_service_time_snapshot ||
+        0
     );
+
+    const activeWindows = Math.max(Number(predictionStats?.active_windows || 1), 1);
 
     if (
       ticket.status === "Done" ||
@@ -449,7 +529,7 @@ function UserDashboard() {
         ticket.initial_people_ahead ?? Math.max((ticket.lane_number || 1) - 1, 0)
       );
 
-      return initialAhead * avgServiceTime;
+      return Math.ceil((initialAhead * avgServiceTime) / activeWindows);
     }
 
     if (ticket.status === "Serving") return 0;
@@ -457,7 +537,7 @@ function UserDashboard() {
     const ahead = getPeopleAhead(ticket);
     if (typeof ahead !== "number") return 0;
 
-    return ahead * avgServiceTime;
+    return Math.ceil((ahead * avgServiceTime) / activeWindows);
   };
 
   const getEstimatedWait = (ticket) => {
@@ -562,6 +642,15 @@ function UserDashboard() {
   };
 
   const getOfficeEstimatedWait = (deptName) => {
+    const predictionStats = getPredictionStats(deptName, currentLaneType);
+
+    if (
+      predictionStats?.predicted_wait_minutes !== undefined &&
+      predictionStats?.predicted_wait_minutes !== null
+    ) {
+      return `${Number(predictionStats.predicted_wait_minutes || 0)} min`;
+    }
+
     const dept = departmentData[deptName];
     if (!dept) return "-";
 
@@ -569,6 +658,11 @@ function UserDashboard() {
     const avgTime = dept.avg_service_time || 0;
 
     return `${pendingCount * avgTime} min`;
+  };
+
+  const getAiMethodLabel = (deptName, laneType) => {
+    const predictionStats = getPredictionStats(deptName, laneType);
+    return predictionStats?.prediction_method || "rule-based queue prediction";
   };
 
   const getDepartmentRecordForQueue = async () => {
@@ -689,7 +783,12 @@ function UserDashboard() {
           ? `${prefix}P${String(nextLaneNumber).padStart(3, "0")}`
           : `${prefix}${String(nextLaneNumber).padStart(3, "0")}`;
 
-        const avgServiceTime = Number(deptData.avg_service_time || 0);
+        const predictionStats = getPredictionStats(selectedDeptName, laneType);
+        const avgServiceTime = Number(
+          predictionStats?.avg_service_minutes || deptData.avg_service_time || 0
+        );
+
+        const activeWindows = Math.max(Number(predictionStats?.active_windows || 1), 1);
 
         const sameLaneActiveCount = allTickets.filter(
           (ticket) =>
@@ -701,7 +800,9 @@ function UserDashboard() {
         ).length;
 
         const initialPeopleAhead = Math.max(sameLaneActiveCount, 0);
-        const initialEstimatedWaitMin = initialPeopleAhead * avgServiceTime;
+        const initialEstimatedWaitMin = Math.ceil(
+          (initialPeopleAhead * avgServiceTime) / activeWindows
+        );
 
         transaction.update(deptRef, {
           [laneLastField]: nextLaneNumber
@@ -721,6 +822,10 @@ function UserDashboard() {
           initial_people_ahead: initialPeopleAhead,
           initial_estimated_wait_min: initialEstimatedWaitMin,
           avg_service_time_snapshot: avgServiceTime,
+          ai_prediction_method_snapshot:
+            predictionStats?.prediction_method || "rule-based queue prediction",
+          ai_confidence_snapshot: Number(predictionStats?.confidence_score || 0.65),
+          active_windows_snapshot: activeWindows,
           window_assignment: assignedWindow,
           assigned_window: assignedWindow,
           created_at: serverTimestamp()
@@ -741,15 +846,15 @@ function UserDashboard() {
 
       if (requestedPriority && priorityStatus === "pending") {
         alert(
-          `Queue Number for ${selectedDeptName}: ${ticketResult.ticketNumber}\n\nLane: Regular\nAssigned Window: ${ticketResult.assignedWindow}\n\nYour priority request is still pending verification, so you were queued under the Regular lane.`
+          `Queue Number for ${selectedDeptName}: ${ticketResult.ticketNumber}\n\nLane: Regular\nAssigned Window: ${ticketResult.assignedWindow}\nAI Estimated Wait: ${ticketResult.initialEstimatedWaitMin} min\n\nYour priority request is still pending verification, so you were queued under the Regular lane.`
         );
       } else if (requestedPriority && priorityStatus === "rejected") {
         alert(
-          `Queue Number for ${selectedDeptName}: ${ticketResult.ticketNumber}\n\nLane: Regular\nAssigned Window: ${ticketResult.assignedWindow}\n\nYour priority request was rejected, so you were queued under the Regular lane.`
+          `Queue Number for ${selectedDeptName}: ${ticketResult.ticketNumber}\n\nLane: Regular\nAssigned Window: ${ticketResult.assignedWindow}\nAI Estimated Wait: ${ticketResult.initialEstimatedWaitMin} min\n\nYour priority request was rejected, so you were queued under the Regular lane.`
         );
       } else {
         alert(
-          `Queue Number for ${selectedDeptName}: ${ticketResult.ticketNumber}\n\nLane: ${ticketResult.laneType}\nAssigned Window: ${ticketResult.assignedWindow}`
+          `Queue Number for ${selectedDeptName}: ${ticketResult.ticketNumber}\n\nLane: ${ticketResult.laneType}\nAssigned Window: ${ticketResult.assignedWindow}\nAI Estimated Wait: ${ticketResult.initialEstimatedWaitMin} min`
         );
       }
 
@@ -862,6 +967,8 @@ function UserDashboard() {
 
   const buildAiQueueMessage = (ticket, ahead, wait) => {
     const windowDisplay = getWindowDisplay(ticket);
+    const laneType = ticket.lane_type || "Regular";
+    const method = getAiMethodLabel(ticket.deptName, laneType);
 
     if (ticket.status === "Serving") {
       return `AI prediction: your queue number ${ticket.ticket_number} is now active in ${ticket.deptName}. Please proceed to ${windowDisplay}.`;
@@ -876,14 +983,14 @@ function UserDashboard() {
     }
 
     if (ahead === 1) {
-      return `AI prediction: only 1 queue number is before your turn in ${ticket.deptName}. Your assigned window is ${windowDisplay}.`;
+      return `AI prediction: only 1 queue number is before your turn in ${ticket.deptName}. Estimated wait is ${wait}. Your assigned window is ${windowDisplay}.`;
     }
 
     if (ahead <= 5) {
       return `AI prediction: your turn is approaching. ${ahead} queue numbers are still before your turn in ${ticket.deptName}. Estimated wait is ${wait}. Your assigned window is ${windowDisplay}.`;
     }
 
-    return `AI prediction: queue movement in ${ticket.deptName} is stable. ${ahead} queue numbers are still before your turn. Estimated wait is ${wait}. Your assigned window is ${windowDisplay}.`;
+    return `AI prediction: ${ahead} queue numbers are still before your turn in ${ticket.deptName}. Estimated wait is ${wait}. Method: ${method}.`;
   };
 
   const generatedNotifications = useMemo(() => {
@@ -995,7 +1102,7 @@ function UserDashboard() {
           category: "system",
           type: "system",
           title: "Queue Number Generated",
-          message: `Your queue number ${ticket.ticket_number} for ${ticket.deptName} has been created successfully. Assigned window: ${windowDisplay}.`,
+          message: `Your queue number ${ticket.ticket_number} for ${ticket.deptName} has been created successfully. Assigned window: ${windowDisplay}. AI estimated wait: ${getEstimatedWait(ticket)}.`,
           time: formatTimestampLabel(ticket.created_at),
           hasMetrics: true,
           popupEligible: false,
@@ -1073,6 +1180,7 @@ function UserDashboard() {
     if (aiNotificationsEnabled) {
       const officeWait = getOfficeEstimatedWait(selectedDeptName);
       const officeQueue = getLanePendingCountByDept(selectedDeptName);
+      const predictionStats = getPredictionStats(selectedDeptName, currentLaneType);
 
       notifications.push({
         id: `ai-best-time-${selectedDeptName}-${currentLaneType}`,
@@ -1084,7 +1192,9 @@ function UserDashboard() {
             ? `AI prediction: ${selectedDeptName} currently has no waiting users in the ${currentLaneType} lane. This is a good time to go now.`
             : `AI prediction: ${selectedDeptName} currently has ${officeQueue} waiting ${
                 officeQueue === 1 ? "person" : "people"
-              } in the ${currentLaneType} lane. Estimated wait is ${officeWait}.`,
+              } in the ${currentLaneType} lane. Estimated wait is ${officeWait}. Active windows: ${
+                predictionStats.active_windows || 1
+              }.`,
         time: "Live",
         hasMetrics: false,
         popupEligible: false,
@@ -1108,7 +1218,9 @@ function UserDashboard() {
     aiNotificationsEnabled,
     systemAnnouncementsEnabled,
     departmentData,
-    allTickets
+    allTickets,
+    officePredictionStats,
+    staffWindows
   ]);
 
   const filteredNotifications = useMemo(() => {
@@ -1383,7 +1495,7 @@ function UserDashboard() {
               </div>
 
               <div className="qf-live-metric-box">
-                <span>Est. Wait</span>
+                <span>AI Est. Wait</span>
                 <strong>{getEstimatedWait(primaryLiveTicket)}</strong>
               </div>
             </div>
@@ -1429,6 +1541,7 @@ function UserDashboard() {
               const lanePending = getLanePendingCountByDept(deptName);
               const nowServing = getSelectedLaneNowServing(deptName);
               const estimated = getOfficeEstimatedWait(deptName);
+              const predictionStats = getPredictionStats(deptName, currentLaneType);
 
               return (
                 <button
@@ -1460,13 +1573,13 @@ function UserDashboard() {
                     </div>
 
                     <div className="qf-office-mini-info">
-                      <span>Est. Wait</span>
+                      <span>AI Est. Wait</span>
                       <strong>{estimated}</strong>
                     </div>
 
                     <div className="qf-office-mini-info">
-                      <span>Your Lane</span>
-                      <strong>{currentLaneType}</strong>
+                      <span>Active Windows</span>
+                      <strong>{predictionStats.active_windows || 1}</strong>
                     </div>
                   </div>
                 </button>
@@ -1494,7 +1607,7 @@ function UserDashboard() {
             <div className="qf-panel-head">
               <div>
                 <h2>AI Prediction</h2>
-                <p>Suggested best time based on current lane traffic.</p>
+                <p>Suggested best time based on queue load, service speed, and active windows.</p>
               </div>
             </div>
 
@@ -1515,6 +1628,11 @@ function UserDashboard() {
                     <strong>{getOfficeEstimatedWait(selectedDeptName)}</strong>.
                   </>
                 )}
+              </p>
+
+              <p>
+                Method:{" "}
+                <strong>{getAiMethodLabel(selectedDeptName, currentLaneType)}</strong>
               </p>
             </div>
           </div>
@@ -1564,7 +1682,7 @@ function UserDashboard() {
                       </div>
 
                       <div>
-                        <span>Estimated Wait</span>
+                        <span>AI Estimated Wait</span>
                         <strong>{getEstimatedWait(ticket)}</strong>
                       </div>
                     </div>
@@ -1634,7 +1752,7 @@ function UserDashboard() {
         </div>
 
         <div className="qf-notification-meta-box">
-          <span>Est. Wait</span>
+          <span>AI Est. Wait</span>
           <strong>{notificationItem.estimatedWait}</strong>
         </div>
       </div>
@@ -1829,7 +1947,7 @@ function UserDashboard() {
                 </div>
 
                 <div>
-                  <span>Estimated Wait</span>
+                  <span>AI Estimated Wait</span>
                   <strong>{getEstimatedWait(ticket)}</strong>
                 </div>
 
@@ -2197,7 +2315,7 @@ function UserDashboard() {
                 </div>
 
                 <div className="qf-ai-popup-mini-box">
-                  <span>Est. Wait</span>
+                  <span>AI Est. Wait</span>
                   <strong>{popupNotification.estimatedWait}</strong>
                 </div>
               </div>

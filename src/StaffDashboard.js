@@ -24,6 +24,7 @@ function StaffDashboard() {
   const [departmentData, setDepartmentData] = useState({});
   const [tickets, setTickets] = useState([]);
   const [usersMap, setUsersMap] = useState({});
+  const [staffWindows, setStaffWindows] = useState([]);
   const [sidebarOpen, setSidebarOpen] = useState(false);
   const [activeSection, setActiveSection] = useState("overview");
 
@@ -60,6 +61,204 @@ function StaffDashboard() {
       .replace(/[^a-zA-Z0-9_-]/g, "");
 
     return `${safeOffice}_${safeWindow}`;
+  };
+
+  const getPredictionStatDocId = (officeName, laneType) => {
+    const safeOffice = String(officeName || "Office")
+      .trim()
+      .replace(/\s+/g, "_")
+      .replace(/[^a-zA-Z0-9_-]/g, "");
+
+    const safeLane = String(laneType || "Regular")
+      .trim()
+      .replace(/\s+/g, "_")
+      .replace(/[^a-zA-Z0-9_-]/g, "");
+
+    return `${safeOffice}_${safeLane}`;
+  };
+
+  const getActiveWindowCountForDept = (deptName, sourceWindows = staffWindows) => {
+    const activeWindowNames = sourceWindows
+      .filter(
+        (item) =>
+          item.is_active === true &&
+          (item.account_status || "active").toLowerCase() === "active" &&
+          (item.office_assignment || "") === deptName &&
+          (item.window_assignment || "").trim() !== ""
+      )
+      .map((item) => String(item.window_assignment || "").trim());
+
+    return Math.max(new Set(activeWindowNames).size, 1);
+  };
+
+  const getSafePredictionStats = (
+    deptName,
+    laneType,
+    sourceTickets = tickets,
+    sourceWindows = staffWindows
+  ) => {
+    const dept = departmentData[deptName] || {};
+    const activeWindows = getActiveWindowCountForDept(deptName, sourceWindows);
+
+    const pendingCount = sourceTickets.filter(
+      (ticket) =>
+        (ticket.dept_name || deptName) === deptName &&
+        ticket.status === "Pending" &&
+        (ticket.lane_type || "Regular") === laneType
+    ).length;
+
+    const recentDoneTickets = sourceTickets.filter(
+      (ticket) =>
+        (ticket.dept_name || deptName) === deptName &&
+        ticket.status === "Done" &&
+        (ticket.lane_type || "Regular") === laneType
+    );
+
+    const transactionDurations = recentDoneTickets
+      .map((ticket) => Number(ticket.duration_sec || 0))
+      .filter((value) => value > 0);
+
+    const baseAvgFromDept = Number(dept.avg_service_time || 5);
+
+    const learnedAvgFromTickets =
+      transactionDurations.length > 0
+        ? Math.max(
+            1,
+            Math.round(
+              transactionDurations.reduce((sum, value) => sum + value, 0) /
+                transactionDurations.length /
+                60
+            )
+          )
+        : 0;
+
+    const avgServiceMinutes = learnedAvgFromTickets || baseAvgFromDept || 5;
+
+    const predictedWaitMinutes = Math.max(
+      0,
+      Math.ceil((pendingCount * avgServiceMinutes) / activeWindows)
+    );
+
+    const confidenceScore =
+      transactionDurations.length >= 10
+        ? 0.9
+        : transactionDurations.length >= 5
+        ? 0.8
+        : transactionDurations.length >= 1
+        ? 0.7
+        : 0.65;
+
+    let predictionMethod = "rule-based queue load prediction";
+
+    if (transactionDurations.length >= 1) {
+      predictionMethod = "historical service-time adjusted prediction";
+    }
+
+    if (activeWindows > 1) {
+      predictionMethod = `${predictionMethod} with active-window adjustment`;
+    }
+
+    return {
+      dept_name: deptName,
+      lane_type: laneType,
+      avg_service_minutes: avgServiceMinutes,
+      active_windows: activeWindows,
+      pending_count: pendingCount,
+      predicted_wait_minutes: predictedWaitMinutes,
+      confidence_score: confidenceScore,
+      prediction_method: predictionMethod,
+      is_active: dept?.is_active !== false
+    };
+  };
+
+  const getFreshDepartmentRecord = async (deptName) => {
+    const localDept = departmentData[deptName];
+
+    if (localDept?.id) {
+      return localDept;
+    }
+
+    const deptQuery = query(
+      collection(db, "departments"),
+      where("dept_name", "==", deptName)
+    );
+
+    const deptSnapshot = await getDocs(deptQuery);
+
+    if (deptSnapshot.empty) {
+      return null;
+    }
+
+    const deptDoc = deptSnapshot.docs[0];
+
+    return {
+      id: deptDoc.id,
+      ...deptDoc.data()
+    };
+  };
+
+  const getFreshTicketsForPrediction = async (deptName) => {
+    const deptRecord = await getFreshDepartmentRecord(deptName);
+
+    if (!deptRecord?.id) {
+      return [];
+    }
+
+    const ticketsQuery = query(
+      collection(db, "queue_tickets"),
+      where("dept_id", "==", deptRecord.id)
+    );
+
+    const ticketsSnapshot = await getDocs(ticketsQuery);
+
+    return ticketsSnapshot.docs.map((docSnap) => ({
+      id: docSnap.id,
+      ...docSnap.data()
+    }));
+  };
+
+  const getFreshStaffWindowsForPrediction = async () => {
+    const staffWindowsSnapshot = await getDocs(collection(db, "staff_windows"));
+
+    return staffWindowsSnapshot.docs.map((docSnap) => ({
+      id: docSnap.id,
+      ...docSnap.data()
+    }));
+  };
+
+  const updateOfficePredictionStats = async (deptName = selectedDeptName) => {
+    try {
+      if (!deptName) return;
+
+      const freshTickets = await getFreshTicketsForPrediction(deptName);
+      const freshStaffWindows = await getFreshStaffWindowsForPrediction();
+
+      const laneTypes = ["Regular", "Priority"];
+
+      await Promise.all(
+        laneTypes.map(async (laneType) => {
+          const stats = getSafePredictionStats(
+            deptName,
+            laneType,
+            freshTickets,
+            freshStaffWindows
+          );
+
+          const statDocId = getPredictionStatDocId(deptName, laneType);
+
+          await setDoc(
+            doc(db, "office_prediction_stats", statDocId),
+            {
+              ...stats,
+              updated_at: serverTimestamp()
+            },
+            { merge: true }
+          );
+        })
+      );
+    } catch (error) {
+      console.error("UPDATE OFFICE PREDICTION STATS ERROR:", error);
+    }
   };
 
   const syncStaffWindowRecord = async () => {
@@ -167,9 +366,26 @@ function StaffDashboard() {
       }
     );
 
+    const unsubscribeStaffWindows = onSnapshot(
+      collection(db, "staff_windows"),
+      (snapshot) => {
+        const data = snapshot.docs.map((docSnap) => ({
+          id: docSnap.id,
+          ...docSnap.data()
+        }));
+
+        setStaffWindows(data);
+      },
+      (error) => {
+        console.error("Staff windows listener error:", error);
+        setStaffWindows([]);
+      }
+    );
+
     return () => {
       unsubscribers.forEach((unsub) => unsub && unsub());
       unsubscribeUsers();
+      unsubscribeStaffWindows();
     };
   }, []);
 
@@ -218,6 +434,16 @@ function StaffDashboard() {
 
     return () => unsubscribe();
   }, [selectedDept, usersMap]);
+
+  useEffect(() => {
+    if (!selectedDeptName || !selectedDept) return;
+
+    const timeoutId = setTimeout(() => {
+      updateOfficePredictionStats(selectedDeptName);
+    }, 800);
+
+    return () => clearTimeout(timeoutId);
+  }, [selectedDeptName, selectedDept, tickets, staffWindows]);
 
   const sortedTickets = useMemo(() => {
     const copy = [...tickets];
@@ -315,6 +541,14 @@ function StaffDashboard() {
     return sortedTickets.length;
   }, [sortedTickets]);
 
+  const regularPredictionStats = useMemo(() => {
+    return getSafePredictionStats(selectedDeptName, "Regular", tickets);
+  }, [selectedDeptName, tickets, departmentData, staffWindows]);
+
+  const priorityPredictionStats = useMemo(() => {
+    return getSafePredictionStats(selectedDeptName, "Priority", tickets);
+  }, [selectedDeptName, tickets, departmentData, staffWindows]);
+
   const normalizeDisplayValue = (value) => {
     if (!value) return "-";
 
@@ -347,8 +581,12 @@ function StaffDashboard() {
       return "0 min";
     }
 
-    const avg = selectedDept?.avg_service_time || 0;
     const laneType = ticket.lane_type || "Regular";
+    const predictionStats =
+      laneType === "Priority" ? priorityPredictionStats : regularPredictionStats;
+
+    const avg = predictionStats.avg_service_minutes || selectedDept?.avg_service_time || 0;
+    const activeWindows = Math.max(predictionStats.active_windows || 1, 1);
 
     const sameLaneActive = sortedTickets
       .filter(
@@ -371,7 +609,7 @@ function StaffDashboard() {
 
     if (index < 0) return "-";
 
-    return `${index * avg} min`;
+    return `${Math.ceil((index * avg) / activeWindows)} min`;
   };
 
   const getQueuePositionLabel = (ticket) => {
@@ -536,6 +774,7 @@ function StaffDashboard() {
       });
 
       await updateDepartmentServingDisplay(nextTicket);
+      await updateOfficePredictionStats(selectedDeptName);
 
       alert(`Now serving: ${nextTicket.ticket_number} at ${assignedWindow || "Window 1"}`);
     } catch (error) {
@@ -587,7 +826,8 @@ function StaffDashboard() {
 
       await updateDoc(doc(db, "queue_tickets", currentServingTicket.id), {
         status: "Done",
-        completed_at: serverTimestamp()
+        completed_at: serverTimestamp(),
+        duration_sec: durationSec
       });
 
       await addDoc(collection(db, "transactions"), {
@@ -609,6 +849,7 @@ function StaffDashboard() {
       });
 
       await clearDepartmentServingDisplay(currentServingTicket);
+      await updateOfficePredictionStats(selectedDeptName);
 
       alert(`Completed: ${currentServingTicket.ticket_number}`);
     } catch (error) {
@@ -646,6 +887,7 @@ function StaffDashboard() {
       });
 
       await clearDepartmentServingDisplay(currentServingTicket);
+      await updateOfficePredictionStats(selectedDeptName);
 
       alert(`Paused: ${currentServingTicket.ticket_number}`);
     } catch (error) {
@@ -686,6 +928,7 @@ function StaffDashboard() {
       });
 
       await updateDepartmentServingDisplay(ticket);
+      await updateOfficePredictionStats(selectedDeptName);
 
       alert(`Resumed: ${ticket.ticket_number} at ${assignedWindow || "Window 1"}`);
     } catch (error) {
@@ -932,7 +1175,7 @@ function StaffDashboard() {
                     </div>
 
                     <div className="qf-staff-meta-box">
-                      <span>Est. Wait</span>
+                      <span>AI Est. Wait</span>
                       <strong>{getEstimatedWaitForTicket(ticket)}</strong>
                     </div>
                   </div>
@@ -1033,7 +1276,7 @@ function StaffDashboard() {
                     </div>
 
                     <div className="qf-staff-meta-box">
-                      <span>Est. Wait</span>
+                      <span>AI Est. Wait</span>
                       <strong>{getEstimatedWaitForTicket(ticket)}</strong>
                     </div>
 
@@ -1095,7 +1338,7 @@ function StaffDashboard() {
                     </div>
 
                     <div className="qf-staff-meta-box">
-                      <span>Est. Wait</span>
+                      <span>AI Est. Wait</span>
                       <strong>{getEstimatedWaitForTicket(ticket)}</strong>
                     </div>
 
