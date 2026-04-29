@@ -1187,11 +1187,26 @@
   margin-top: 4px;
 }
 
+.qf-notification-center-panel {
+  padding: 0;
+  background:
+    radial-gradient(circle at top right, rgba(46, 168, 255, 0.08), transparent 30%),
+    linear-gradient(180deg, rgba(15, 23, 42, 0.86), rgba(6, 11, 20, 0.94));
+  overflow: hidden;
+}
+
 .qf-notification-filter-row {
   display: flex;
   gap: 10px;
   flex-wrap: wrap;
   margin-bottom: 16px;
+}
+
+.qf-notification-filter-modern {
+  padding: 18px 20px;
+  margin-bottom: 0;
+  border-bottom: 1px solid rgba(148, 163, 184, 0.1);
+  background: rgba(2, 6, 13, 0.22);
 }
 
 .qf-notification-filter-pill {
@@ -1214,6 +1229,183 @@
 .qf-notification-list {
   display: grid;
   gap: 14px;
+}
+
+.qf-notification-timeline {
+  display: grid;
+  gap: 0;
+  padding: 0 0 10px 0;
+}
+
+.qf-notification-date-group {
+  display: grid;
+  gap: 0;
+}
+
+.qf-notification-date-header {
+  position: sticky;
+  top: 0;
+  z-index: 2;
+  padding: 18px 22px 10px;
+  background:
+    linear-gradient(180deg, rgba(8, 15, 28, 0.96), rgba(8, 15, 28, 0.78));
+  backdrop-filter: blur(14px);
+}
+
+.qf-notification-date-header span {
+  color: #94a3b8;
+  font-size: 15px;
+  font-weight: 900;
+  letter-spacing: 0.01em;
+}
+
+.qf-notification-date-list {
+  display: grid;
+}
+
+.qf-notification-row {
+  width: 100%;
+  padding: 18px 22px;
+  display: grid;
+  grid-template-columns: 46px minmax(0, 1fr) auto;
+  gap: 16px;
+  align-items: flex-start;
+  border: none;
+  border-top: 1px solid rgba(148, 163, 184, 0.08);
+  background: transparent;
+  color: inherit;
+  text-align: left;
+  cursor: pointer;
+  transition: background 0.18s ease;
+}
+
+.qf-notification-row:hover {
+  background: rgba(255, 255, 255, 0.035);
+}
+
+.qf-notification-row.read {
+  opacity: 0.76;
+}
+
+.qf-notification-row-left {
+  display: flex;
+  justify-content: center;
+  padding-top: 4px;
+}
+
+.qf-notification-icon {
+  width: 34px;
+  height: 34px;
+  min-width: 34px;
+  border-radius: 12px;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  font-size: 15px;
+  font-weight: 950;
+  color: #dbeafe;
+  background: rgba(59, 130, 246, 0.13);
+  border: 1px solid rgba(59, 130, 246, 0.22);
+}
+
+.qf-notification-icon-turn {
+  color: #bbf7d0;
+  background: rgba(34, 197, 94, 0.13);
+  border-color: rgba(34, 197, 94, 0.24);
+}
+
+.qf-notification-icon-next {
+  color: #bfdbfe;
+  background: rgba(59, 130, 246, 0.14);
+  border-color: rgba(59, 130, 246, 0.24);
+}
+
+.qf-notification-icon-warning {
+  color: #fde68a;
+  background: rgba(245, 158, 11, 0.13);
+  border-color: rgba(245, 158, 11, 0.24);
+}
+
+.qf-notification-icon-ai {
+  color: #bae6fd;
+  background: rgba(14, 165, 233, 0.13);
+  border-color: rgba(14, 165, 233, 0.24);
+}
+
+.qf-notification-icon-system {
+  color: #cbd5e1;
+  background: rgba(148, 163, 184, 0.12);
+  border-color: rgba(148, 163, 184, 0.2);
+}
+
+.qf-notification-row-main {
+  min-width: 0;
+}
+
+.qf-notification-row-heading {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  min-height: 18px;
+  margin-bottom: 5px;
+}
+
+.qf-notification-office-label {
+  color: #a5b4fc;
+  font-size: 13px;
+  line-height: 1.3;
+  font-weight: 850;
+  letter-spacing: 0.01em;
+}
+
+.qf-notification-unread-dot {
+  width: 8px;
+  height: 8px;
+  min-width: 8px;
+  border-radius: 50%;
+  background: #60a5fa;
+  box-shadow: 0 0 0 4px rgba(96, 165, 250, 0.12);
+}
+
+.qf-notification-row h3 {
+  margin: 0;
+  color: #ffffff;
+  font-size: 16px;
+  font-weight: 900;
+  line-height: 1.35;
+}
+
+.qf-notification-row p {
+  margin: 5px 0 0 0;
+  color: #94a3b8;
+  font-size: 14px;
+  line-height: 1.55;
+}
+
+.qf-notification-quick-details {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+  margin-top: 11px;
+}
+
+.qf-notification-quick-details span {
+  padding: 5px 9px;
+  border-radius: 999px;
+  background: rgba(255, 255, 255, 0.04);
+  border: 1px solid rgba(148, 163, 184, 0.11);
+  color: #cbd5e1;
+  font-size: 12px;
+  font-weight: 800;
+  line-height: 1.2;
+}
+
+.qf-notification-row-time {
+  color: #64748b;
+  font-size: 12px;
+  font-weight: 800;
+  white-space: nowrap;
+  padding-top: 3px;
 }
 
 .qf-notification-card {
@@ -1772,7 +1964,6 @@
 
   .qf-live-metrics-grid,
   .qf-history-meta,
-  .qf-notification-meta-grid,
   .qf-user-overview-grid,
   .qf-queue-dashboard-grid {
     grid-template-columns: repeat(2, minmax(0, 1fr));
@@ -1808,6 +1999,15 @@
   .qf-live-metrics-grid {
     grid-template-columns: repeat(2, minmax(0, 1fr));
   }
+
+  .qf-notification-row {
+    grid-template-columns: 42px minmax(0, 1fr);
+  }
+
+  .qf-notification-row-time {
+    grid-column: 2;
+    padding-top: 0;
+  }
 }
 
 @media (max-width: 768px) {
@@ -1825,6 +2025,10 @@
   .qf-page-header-card {
     padding: 18px;
     border-radius: 22px;
+  }
+
+  .qf-notification-center-panel {
+    padding: 0;
   }
 
   .qf-page-header-card,
@@ -1849,7 +2053,6 @@
   .qf-account-readonly-grid,
   .qf-queue-bottom-grid,
   .qf-office-select-right,
-  .qf-notification-meta-grid,
   .qf-ai-popup-mini-grid,
   .qf-compact-info-grid,
   .qf-user-overview-grid,
@@ -1878,7 +2081,6 @@
   .qf-setting-card,
   .qf-compact-ticket-top,
   .qf-history-head,
-  .qf-notification-card-top,
   .qf-notification-head-row,
   .qf-ai-popup-actions,
   .qf-ticket-smart-top,
@@ -1908,6 +2110,27 @@
   .qf-empty-state-v2 {
     min-height: 130px;
     padding: 24px 18px;
+  }
+
+  .qf-notification-filter-modern {
+    padding: 16px;
+  }
+
+  .qf-notification-date-header {
+    padding: 16px 16px 8px;
+  }
+
+  .qf-notification-row {
+    padding: 16px;
+    gap: 12px;
+  }
+
+  .qf-notification-row h3 {
+    font-size: 15px;
+  }
+
+  .qf-notification-row p {
+    font-size: 13px;
   }
 
   .qf-ai-popup {
@@ -1968,13 +2191,40 @@
 
   .qf-live-metrics-grid,
   .qf-history-meta,
-  .qf-office-select-right,
-  .qf-notification-meta-grid {
+  .qf-office-select-right {
     grid-template-columns: 1fr;
   }
 
   .qf-notification-card {
     padding: 16px;
+  }
+
+  .qf-notification-row {
+    grid-template-columns: 36px minmax(0, 1fr);
+    padding: 15px 14px;
+    gap: 10px;
+  }
+
+  .qf-notification-icon {
+    width: 30px;
+    height: 30px;
+    min-width: 30px;
+    border-radius: 10px;
+    font-size: 13px;
+  }
+
+  .qf-notification-row-time {
+    grid-column: 2;
+    font-size: 11px;
+  }
+
+  .qf-notification-quick-details {
+    gap: 6px;
+  }
+
+  .qf-notification-quick-details span {
+    font-size: 11px;
+    padding: 5px 8px;
   }
 
   .qf-office-select-card {

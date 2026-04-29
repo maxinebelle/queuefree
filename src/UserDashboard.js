@@ -1004,6 +1004,26 @@ function UserDashboard() {
     }
   };
 
+  const getTimestampMillis = (value) => {
+    if (value?.toDate) {
+      return value.toDate().getTime();
+    }
+
+    if (value?.seconds) {
+      return value.seconds * 1000;
+    }
+
+    if (value instanceof Date) {
+      return value.getTime();
+    }
+
+    if (typeof value === "number") {
+      return value;
+    }
+
+    return Date.now();
+  };
+
   const formatTimestampLabel = (value) => {
     if (value?.toDate) {
       return value.toDate().toLocaleString();
@@ -1014,6 +1034,52 @@ function UserDashboard() {
     }
 
     return "Live";
+  };
+
+  const getNotificationDateLabel = (timeValue) => {
+    const date = new Date(timeValue);
+    const today = new Date();
+    const yesterday = new Date();
+    yesterday.setDate(today.getDate() - 1);
+
+    const sameDate = (a, b) =>
+      a.getFullYear() === b.getFullYear() &&
+      a.getMonth() === b.getMonth() &&
+      a.getDate() === b.getDate();
+
+    if (sameDate(date, today)) return "Today";
+    if (sameDate(date, yesterday)) return "Yesterday";
+
+    return date.toLocaleDateString(undefined, {
+      month: "short",
+      day: "numeric",
+      year: "numeric"
+    });
+  };
+
+  const getNotificationTimeLabel = (timeValue) => {
+    const date = new Date(timeValue);
+
+    return date.toLocaleTimeString(undefined, {
+      hour: "numeric",
+      minute: "2-digit"
+    });
+  };
+
+  const getNotificationIcon = (type) => {
+    if (type === "turn") return "✓";
+    if (type === "next") return "→";
+    if (type === "warning") return "!";
+    if (type === "ai") return "i";
+    return "•";
+  };
+
+  const getNotificationPanelTitle = (notificationItem) => {
+    return notificationItem.panelTitle || notificationItem.title || "Queue Update";
+  };
+
+  const getNotificationPanelMessage = (notificationItem) => {
+    return notificationItem.panelMessage || notificationItem.message || "Your queue update is ready.";
   };
 
   const isRecentTicket = (ticket) => {
@@ -1103,6 +1169,7 @@ function UserDashboard() {
       const nowServing = getNowServingDisplay(ticket.deptName, laneType);
       const windowDisplay = getWindowDisplay(ticket);
       const proceedInstruction = getProceedInstruction(ticket);
+      const timestamp = getTimestampMillis(ticket.updated_at || ticket.called_at || ticket.created_at);
 
       if (queueAlertsEnabled && status === "Serving") {
         notifications.push({
@@ -1111,7 +1178,10 @@ function UserDashboard() {
           type: "turn",
           title: "It's Your Turn!",
           message: `Your queue number ${ticket.ticket_number} in ${ticket.deptName} is now being called. ${proceedInstruction}`,
+          panelTitle: `${ticket.deptName} is calling your number`,
+          panelMessage: `Queue ${ticket.ticket_number} is now being served. Please proceed to ${windowDisplay}.`,
           time: "Live",
+          timestamp,
           hasMetrics: true,
           popupEligible: true,
           ticketNumber: ticket.ticket_number,
@@ -1132,7 +1202,10 @@ function UserDashboard() {
           type: "next",
           title: "You're Next",
           message: `Only 1 queue number is before your turn in ${ticket.deptName}. Current now serving is ${nowServing}. Your number is ${ticket.ticket_number}. Assigned window: ${windowDisplay}.`,
+          panelTitle: `You're next for ${ticket.deptName}`,
+          panelMessage: `Only 1 queue number is ahead of you. Please stay nearby and keep your ticket ${ticket.ticket_number} ready.`,
           time: "Live",
+          timestamp,
           hasMetrics: true,
           popupEligible: true,
           ticketNumber: ticket.ticket_number,
@@ -1155,7 +1228,10 @@ function UserDashboard() {
           message: `${ahead} queue number${ahead === 1 ? "" : "s"} ${
             ahead === 1 ? "is" : "are"
           } before your turn in ${ticket.deptName}. Please get ready. Assigned window: ${windowDisplay}.`,
+          panelTitle: `Your turn is getting closer`,
+          panelMessage: `${ahead} queue number${ahead === 1 ? "" : "s"} before ${ticket.ticket_number}. You can start preparing for ${ticket.deptName}.`,
           time: "Live",
+          timestamp,
           hasMetrics: true,
           popupEligible: true,
           ticketNumber: ticket.ticket_number,
@@ -1178,7 +1254,13 @@ function UserDashboard() {
           type: "ai",
           title: "Queue Update",
           message: buildAiQueueMessage(ticket, ahead, wait),
+          panelTitle: `Update for ${ticket.deptName}`,
+          panelMessage:
+            status === "Serving"
+              ? `Your queue number ${ticket.ticket_number} is now active at ${windowDisplay}.`
+              : `${getFriendlyPositionLabel(ticket)} Estimated wait: ${wait}.`,
           time: "Live",
+          timestamp,
           hasMetrics: typeof ahead === "number",
           popupEligible: false,
           ticketNumber: ticket.ticket_number,
@@ -1195,13 +1277,18 @@ function UserDashboard() {
       }
 
       if (systemAnnouncementsEnabled && isRecentTicket(ticket)) {
+        const createdTimestamp = getTimestampMillis(ticket.created_at);
+
         notifications.push({
           id: `${ticket.id}-created`,
           category: "system",
           type: "system",
           title: "Queue Number Generated",
           message: `Your queue number ${ticket.ticket_number} for ${ticket.deptName} has been created successfully. Assigned window: ${windowDisplay}. Estimated wait: ${getEstimatedWait(ticket)}.`,
+          panelTitle: `Queue number created`,
+          panelMessage: `${ticket.ticket_number} was added to ${ticket.deptName}. Assigned window: ${windowDisplay}.`,
           time: formatTimestampLabel(ticket.created_at),
+          timestamp: createdTimestamp,
           hasMetrics: true,
           popupEligible: false,
           ticketNumber: ticket.ticket_number,
@@ -1218,6 +1305,8 @@ function UserDashboard() {
       }
     });
 
+    const profileTimestamp = Date.now();
+
     if (
       systemAnnouncementsEnabled &&
       userProfile?.is_priority === true &&
@@ -1230,7 +1319,10 @@ function UserDashboard() {
         title: "Priority Request Pending",
         message:
           "Your priority request is still under review. Until approved, your queue lane remains under Regular.",
+        panelTitle: "Priority request under review",
+        panelMessage: "For now, you can still join queues through the Regular lane while waiting for approval.",
         time: "Live",
+        timestamp: profileTimestamp,
         hasMetrics: false,
         popupEligible: false,
         popupPriority: 6
@@ -1249,7 +1341,10 @@ function UserDashboard() {
         title: "Priority Request Approved",
         message:
           "Your priority request has been approved. You may now use the Priority lane when joining a queue.",
+        panelTitle: "Priority access approved",
+        panelMessage: "Your next queue request can use the Priority lane based on your approved status.",
         time: "Live",
+        timestamp: profileTimestamp,
         hasMetrics: false,
         popupEligible: false,
         popupPriority: 6
@@ -1268,7 +1363,10 @@ function UserDashboard() {
         title: "Priority Request Rejected",
         message:
           "Your priority request was rejected, so your queue access remains under the Regular lane.",
+        panelTitle: "Priority request not approved",
+        panelMessage: "You can continue joining queues through the Regular lane.",
         time: "Live",
+        timestamp: profileTimestamp,
         hasMetrics: false,
         popupEligible: false,
         popupPriority: 6
@@ -1290,7 +1388,13 @@ function UserDashboard() {
             : `${selectedDeptName} currently has ${officeQueue} waiting ${
                 officeQueue === 1 ? "queue number" : "queue numbers"
               } in the ${currentLaneType} lane. Estimated wait is ${officeWait}.`,
+        panelTitle: `${selectedDeptName} queue guide`,
+        panelMessage:
+          officeQueue === 0
+            ? `There is no waiting queue in your selected lane right now.`
+            : `${officeQueue} queue number${officeQueue === 1 ? "" : "s"} waiting in your selected lane. Estimated wait: ${officeWait}.`,
         time: "Live",
+        timestamp: Date.now(),
         hasMetrics: false,
         popupEligible: false,
         popupPriority: 7
@@ -1300,7 +1404,10 @@ function UserDashboard() {
     notifications.sort((a, b) => {
       const aPriority = a.popupPriority || 99;
       const bPriority = b.popupPriority || 99;
-      return aPriority - bPriority;
+
+      if (aPriority !== bPriority) return aPriority - bPriority;
+
+      return Number(b.timestamp || 0) - Number(a.timestamp || 0);
     });
 
     return notifications;
@@ -1325,6 +1432,37 @@ function UserDashboard() {
       (notificationItem) => notificationItem.category === notificationFilter
     );
   }, [generatedNotifications, notificationFilter]);
+
+  const groupedFilteredNotifications = useMemo(() => {
+    const groups = [];
+    const groupMap = new Map();
+
+    filteredNotifications.forEach((notificationItem) => {
+      const timestamp = Number(notificationItem.timestamp || Date.now());
+      const dateLabel = getNotificationDateLabel(timestamp);
+
+      if (!groupMap.has(dateLabel)) {
+        const group = {
+          label: dateLabel,
+          sortTime: timestamp,
+          items: []
+        };
+
+        groupMap.set(dateLabel, group);
+        groups.push(group);
+      }
+
+      groupMap.get(dateLabel).items.push(notificationItem);
+    });
+
+    groups.forEach((group) => {
+      group.items.sort((a, b) => Number(b.timestamp || 0) - Number(a.timestamp || 0));
+    });
+
+    groups.sort((a, b) => Number(b.sortTime || 0) - Number(a.sortTime || 0));
+
+    return groups;
+  }, [filteredNotifications]);
 
   const unreadNotificationCount = useMemo(() => {
     return generatedNotifications.filter(
@@ -2020,61 +2158,13 @@ function UserDashboard() {
     );
   };
 
-  const renderNotificationMetrics = (notificationItem) => {
-    if (!notificationItem.hasMetrics) return null;
-
-    return (
-      <div className="qf-notification-meta-grid">
-        <div className="qf-notification-meta-box">
-          <span>Ticket</span>
-          <strong>{notificationItem.ticketNumber}</strong>
-        </div>
-
-        <div className="qf-notification-meta-box">
-          <span>Office</span>
-          <strong>{notificationItem.deptName || "-"}</strong>
-        </div>
-
-        <div className="qf-notification-meta-box">
-          <span>Lane</span>
-          <strong>{notificationItem.laneType || "-"}</strong>
-        </div>
-
-        <div className="qf-notification-meta-box">
-          <span>Assigned Window</span>
-          <strong>{notificationItem.assignedWindow || "-"}</strong>
-        </div>
-
-        <div className="qf-notification-meta-box">
-          <span>Now Serving</span>
-          <strong>{notificationItem.nowServing}</strong>
-        </div>
-
-        <div className="qf-notification-meta-box">
-          <span>Queue Position</span>
-          <strong>{notificationItem.numbersBeforeTurnLabel}</strong>
-        </div>
-
-        <div className="qf-notification-meta-box">
-          <span>After You</span>
-          <strong>{notificationItem.afterYou}</strong>
-        </div>
-
-        <div className="qf-notification-meta-box">
-          <span>Est. Wait</span>
-          <strong>{notificationItem.estimatedWait}</strong>
-        </div>
-      </div>
-    );
-  };
-
   const renderNotificationsSection = () => (
     <>
       {renderPageHeader({
         label: "Notifications",
-        title: "Queue Alerts Center",
+        title: "Queue Updates",
         description:
-          "Important queue alerts, queue predictions, priority updates, and system messages are organized here.",
+          "Your queue alerts are grouped by date so you can read them like a real notification center.",
         action: (
           <button
             type="button"
@@ -2086,8 +2176,8 @@ function UserDashboard() {
         )
       })}
 
-      <section className="qf-panel-v2">
-        <div className="qf-notification-filter-row">
+      <section className="qf-panel-v2 qf-notification-center-panel">
+        <div className="qf-notification-filter-row qf-notification-filter-modern">
           <button
             type="button"
             className={`qf-notification-filter-pill ${
@@ -2119,44 +2209,80 @@ function UserDashboard() {
           </button>
         </div>
 
-        <div className="qf-notification-list">
-          {filteredNotifications.length === 0 ? (
-            <div className="qf-empty-state-v2">
-              <div className="qf-empty-title">No notifications</div>
-              <p>Your queue updates will appear here.</p>
-            </div>
-          ) : (
-            filteredNotifications.map((notificationItem) => {
-              const isRead = readNotificationIds.includes(notificationItem.id);
+        {filteredNotifications.length === 0 ? (
+          <div className="qf-empty-state-v2">
+            <div className="qf-empty-title">No notifications</div>
+            <p>Your queue updates will appear here.</p>
+          </div>
+        ) : (
+          <div className="qf-notification-timeline">
+            {groupedFilteredNotifications.map((group) => (
+              <div key={group.label} className="qf-notification-date-group">
+                <div className="qf-notification-date-header">
+                  <span>{group.label}</span>
+                </div>
 
-              return (
-                <button
-                  key={notificationItem.id}
-                  type="button"
-                  className={`qf-notification-card qf-notification-${notificationItem.type} ${
-                    isRead ? "read" : "unread"
-                  }`}
-                  onClick={() => markNotificationAsRead(notificationItem.id)}
-                >
-                  <div className="qf-notification-card-top">
-                    <div className="qf-notification-title-wrap">
-                      <div className={`qf-notification-dot ${isRead ? "read" : ""}`}></div>
+                <div className="qf-notification-date-list">
+                  {group.items.map((notificationItem) => {
+                    const isRead = readNotificationIds.includes(notificationItem.id);
+                    const timestamp = Number(notificationItem.timestamp || Date.now());
 
-                      <div>
-                        <h3>{notificationItem.title}</h3>
-                        <p>{notificationItem.message}</p>
-                      </div>
-                    </div>
+                    return (
+                      <button
+                        key={notificationItem.id}
+                        type="button"
+                        className={`qf-notification-row qf-notification-row-${notificationItem.type} ${
+                          isRead ? "read" : "unread"
+                        }`}
+                        onClick={() => markNotificationAsRead(notificationItem.id)}
+                      >
+                        <div className="qf-notification-row-left">
+                          <div className={`qf-notification-icon qf-notification-icon-${notificationItem.type}`}>
+                            {getNotificationIcon(notificationItem.type)}
+                          </div>
+                        </div>
 
-                    <span className="qf-notification-time">{notificationItem.time}</span>
-                  </div>
+                        <div className="qf-notification-row-main">
+                          <div className="qf-notification-row-heading">
+                            <span className="qf-notification-office-label">
+                              {notificationItem.deptName ||
+                                (notificationItem.category === "queue" ? "Queue" : "System")}
+                            </span>
 
-                  {renderNotificationMetrics(notificationItem)}
-                </button>
-              );
-            })
-          )}
-        </div>
+                            {!isRead && <span className="qf-notification-unread-dot"></span>}
+                          </div>
+
+                          <h3>{getNotificationPanelTitle(notificationItem)}</h3>
+                          <p>{getNotificationPanelMessage(notificationItem)}</p>
+
+                          {notificationItem.hasMetrics && (
+                            <div className="qf-notification-quick-details">
+                              {notificationItem.ticketNumber && (
+                                <span>Ticket {notificationItem.ticketNumber}</span>
+                              )}
+
+                              {notificationItem.assignedWindow && (
+                                <span>{notificationItem.assignedWindow}</span>
+                              )}
+
+                              {notificationItem.estimatedWait && (
+                                <span>{notificationItem.estimatedWait}</span>
+                              )}
+                            </div>
+                          )}
+                        </div>
+
+                        <div className="qf-notification-row-time">
+                          {getNotificationTimeLabel(timestamp)}
+                        </div>
+                      </button>
+                    );
+                  })}
+                </div>
+              </div>
+            ))}
+          </div>
+        )}
       </section>
     </>
   );
@@ -2681,4 +2807,3 @@ function UserDashboard() {
 }
 
 export default UserDashboard;
-
