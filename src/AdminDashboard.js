@@ -85,6 +85,13 @@ function AdminDashboard() {
     return "-";
   }
 
+  function getDateFromFirestoreValue(value) {
+    if (value?.toDate) return value.toDate();
+    if (value?.seconds) return new Date(value.seconds * 1000);
+    if (value instanceof Date) return value;
+    return null;
+  }
+
   function getProofType(proofData = "") {
     if (!proofData || typeof proofData !== "string") return "none";
     if (proofData.startsWith("data:image")) return "image";
@@ -432,6 +439,21 @@ function AdminDashboard() {
     return Math.max(1, Math.round(avgServiceSeconds / 60));
   }, [avgServiceSeconds]);
 
+  const completionRate = useMemo(() => {
+    if (!totalTickets) return 0;
+    return Math.round((totalDone / totalTickets) * 100);
+  }, [totalDone, totalTickets]);
+
+  const activeQueueRate = useMemo(() => {
+    if (!totalTickets) return 0;
+    return Math.round((totalRequests / totalTickets) * 100);
+  }, [totalRequests, totalTickets]);
+
+  const priorityRate = useMemo(() => {
+    if (!totalTickets) return 0;
+    return Math.round((totalPriority / totalTickets) * 100);
+  }, [totalPriority, totalTickets]);
+
   const getDepartmentCounts = (deptId) => {
     const deptTickets = tickets.filter((ticket) => ticket.dept_id === deptId);
 
@@ -516,14 +538,7 @@ function AdminDashboard() {
     };
 
     tickets.forEach((ticket) => {
-      let dateObj = null;
-
-      if (ticket.created_at?.toDate) {
-        dateObj = ticket.created_at.toDate();
-      } else if (ticket.created_at?.seconds) {
-        dateObj = new Date(ticket.created_at.seconds * 1000);
-      }
-
+      const dateObj = getDateFromFirestoreValue(ticket.created_at);
       if (!dateObj) return;
 
       const hour = dateObj.getHours();
@@ -575,9 +590,27 @@ function AdminDashboard() {
           value: counts.total,
           active: counts.active,
           pending: counts.pending,
+          serving: counts.serving,
           done: counts.done,
           priority: counts.priority,
           regular: counts.regular
+        };
+      })
+    );
+  }, [departments, tickets]);
+
+  const activeQueuePressureData = useMemo(() => {
+    return makeBarData(
+      departments.map((dept) => {
+        const counts = getDepartmentCounts(dept.id);
+
+        return {
+          label: dept.dept_name || "Office",
+          value: counts.active,
+          pending: counts.pending,
+          serving: counts.serving,
+          paused: counts.paused,
+          total: counts.total
         };
       })
     );
@@ -594,10 +627,86 @@ function AdminDashboard() {
     ]);
   }, [totalPending, totalServing, totalPaused, totalDone, totalReset, totalCancelled]);
 
+  const laneDistributionData = useMemo(() => {
+    return makeBarData([
+      {
+        label: "Regular",
+        value: totalRegular,
+        className: "qf-admin-bar-regular"
+      },
+      {
+        label: "Priority",
+        value: totalPriority,
+        className: "qf-admin-bar-priority"
+      }
+    ]);
+  }, [totalRegular, totalPriority]);
+
+  const transactionByOfficeData = useMemo(() => {
+    const map = {};
+
+    departments.forEach((dept) => {
+      map[dept.dept_name || dept.id] = 0;
+    });
+
+    transactions.forEach((item) => {
+      const deptName = item.dept_name || getDepartmentNameById(item.dept_id);
+      map[deptName] = (map[deptName] || 0) + 1;
+    });
+
+    return makeBarData(
+      Object.entries(map).map(([label, value]) => ({
+        label,
+        value
+      }))
+    );
+  }, [departments, transactions]);
+
+  const serviceSpeedByOfficeData = useMemo(() => {
+    const officeMap = {};
+
+    transactions.forEach((item) => {
+      const deptName = item.dept_name || getDepartmentNameById(item.dept_id);
+      const duration = Number(item.duration_sec || 0);
+
+      if (!officeMap[deptName]) {
+        officeMap[deptName] = {
+          total: 0,
+          count: 0
+        };
+      }
+
+      if (duration > 0) {
+        officeMap[deptName].total += duration;
+        officeMap[deptName].count += 1;
+      }
+    });
+
+    const rows = departments.map((dept) => {
+      const label = dept.dept_name || "Office";
+      const record = officeMap[label];
+
+      const averageSeconds =
+        record && record.count > 0 ? Math.round(record.total / record.count) : 0;
+
+      return {
+        label,
+        value: averageSeconds
+      };
+    });
+
+    return makeBarData(rows);
+  }, [departments, transactions]);
+
   const topDepartment = useMemo(() => {
     if (departmentSummaryData.length === 0) return null;
     return [...departmentSummaryData].sort((a, b) => b.value - a.value)[0];
   }, [departmentSummaryData]);
+
+  const busiestActiveOffice = useMemo(() => {
+    if (activeQueuePressureData.length === 0) return null;
+    return [...activeQueuePressureData].sort((a, b) => b.value - a.value)[0];
+  }, [activeQueuePressureData]);
 
   const peakInsight = useMemo(() => {
     const sorted = [...peakHourData].sort((a, b) => b.value - a.value);
@@ -609,13 +718,30 @@ function AdminDashboard() {
     const top = sorted[0];
 
     if (top.value === 0) {
-      return "No peak queue hour detected yet. The system will update once users start joining queues.";
+      return "No peak queue hour detected yet.";
     }
 
-    return `${top.label} currently has the highest queue activity with ${top.value} ticket${
+    return `${top.label} has the highest activity with ${top.value} ticket${
       top.value === 1 ? "" : "s"
     }.`;
   }, [peakHourData]);
+
+  const analyticsInsight = useMemo(() => {
+    if (totalTickets === 0) {
+      return "No queue activity yet. Analytics will update automatically once users generate queue tickets.";
+    }
+
+    const busiestOffice = topDepartment?.label || "No office yet";
+    const pressureOffice = busiestActiveOffice?.label || "No active office yet";
+
+    return `${busiestOffice} has the highest total queue volume. ${pressureOffice} has the highest active queue pressure. Completion rate is ${completionRate}% and priority lane usage is ${priorityRate}%.`;
+  }, [
+    totalTickets,
+    topDepartment,
+    busiestActiveOffice,
+    completionRate,
+    priorityRate
+  ]);
 
   const summaryInsight = useMemo(() => {
     const activePercent = getPercent(totalRequests, totalTickets);
@@ -1234,6 +1360,55 @@ function AdminDashboard() {
     </div>
   );
 
+  const renderDonutMetric = ({
+    label,
+    value,
+    total,
+    helper,
+    className = ""
+  }) => {
+    const percent = getPercent(value, total);
+    const degrees = Math.round((percent / 100) * 360);
+
+    return (
+      <div className={`qf-admin-donut-card ${className}`}>
+        <div
+          className="qf-admin-donut-ring"
+          style={{
+            background: `radial-gradient(circle, rgba(2,6,13,0.96) 0%, rgba(2,6,13,0.96) 52%, transparent 54%), conic-gradient(#2ea8ff 0deg, #8b5cf6 ${degrees}deg, rgba(148,163,184,0.16) ${degrees}deg 360deg)`
+          }}
+        >
+          <strong>{percent}%</strong>
+        </div>
+
+        <div className="qf-admin-donut-info">
+          <span>{label}</span>
+          <strong>
+            {value} / {total || 0}
+          </strong>
+          <p>{helper}</p>
+        </div>
+      </div>
+    );
+  };
+
+  const renderAnalyticsCard = ({ title, label, value, helper, children }) => (
+    <div className="qf-admin-analytics-visual-card">
+      <div className="qf-admin-analytics-card-top">
+        <div>
+          <span>{label}</span>
+          <h3>{title}</h3>
+        </div>
+
+        <strong>{value}</strong>
+      </div>
+
+      {children}
+
+      {helper && <p className="qf-admin-analytics-helper">{helper}</p>}
+    </div>
+  );
+
   const renderOfficesSection = () => (
     <div className="qf-admin-content-grid">
       {renderAdminOverviewCard()}
@@ -1363,65 +1538,213 @@ function AdminDashboard() {
 
   const renderAnalyticsSection = () => (
     <div className="qf-admin-content-grid">
-      <div className="qf-admin-section-card">
-        <div className="qf-admin-section-headline">
-          <h2>Analytics</h2>
-          <p>Live queue insights and performance summary.</p>
+      <div className="qf-admin-section-card qf-admin-analytics-shell">
+        <div className="qf-admin-section-headline qf-admin-report-title-row">
+          <div>
+            <h2>Analytics</h2>
+            <p>
+              Queue-focused visual analytics for live queue status, office demand,
+              priority lane usage, peak hours, and service performance.
+            </p>
+          </div>
+
+          <span className="qf-admin-live-pill">Live Queue Data</span>
         </div>
 
-        <div className="qf-admin-analytics-summary">
-          <div className="qf-admin-analytics-chip">
-            <span>Pending</span>
-            <strong>{totalPending}</strong>
+        <div className="qf-admin-analytics-hero-grid">
+          <div className="qf-admin-analytics-hero-card">
+            <div className="qf-admin-analytics-hero-top">
+              <div>
+                <span>System Queue Overview</span>
+                <h3>{systemHealthLabel}</h3>
+              </div>
+
+              <strong>{totalTickets}</strong>
+            </div>
+
+            <p>{analyticsInsight}</p>
+
+            <div className="qf-admin-analytics-progress-grid">
+              <div>
+                <span>Completion Rate</span>
+                <strong>{completionRate}%</strong>
+                <div className="qf-admin-mini-track">
+                  <div style={{ width: `${completionRate}%` }}></div>
+                </div>
+              </div>
+
+              <div>
+                <span>Active Queue Rate</span>
+                <strong>{activeQueueRate}%</strong>
+                <div className="qf-admin-mini-track">
+                  <div style={{ width: `${activeQueueRate}%` }}></div>
+                </div>
+              </div>
+
+              <div>
+                <span>Priority Usage</span>
+                <strong>{priorityRate}%</strong>
+                <div className="qf-admin-mini-track priority">
+                  <div style={{ width: `${priorityRate}%` }}></div>
+                </div>
+              </div>
+            </div>
           </div>
 
-          <div className="qf-admin-analytics-chip">
-            <span>Serving</span>
-            <strong>{totalServing}</strong>
-          </div>
+          <div className="qf-admin-analytics-score-grid">
+            <div className="qf-admin-analytics-score-card">
+              <span>Pending</span>
+              <strong>{totalPending}</strong>
+              <p>waiting tickets</p>
+            </div>
 
-          <div className="qf-admin-analytics-chip">
-            <span>Paused</span>
-            <strong>{totalPaused}</strong>
-          </div>
+            <div className="qf-admin-analytics-score-card">
+              <span>Serving</span>
+              <strong>{totalServing}</strong>
+              <p>currently called</p>
+            </div>
 
-          <div className="qf-admin-analytics-chip">
-            <span>Done</span>
-            <strong>{totalDone}</strong>
-          </div>
+            <div className="qf-admin-analytics-score-card">
+              <span>Transactions</span>
+              <strong>{transactions.length}</strong>
+              <p>completed services</p>
+            </div>
 
-          <div className="qf-admin-analytics-chip">
-            <span>Priority</span>
-            <strong>{totalPriority}</strong>
-          </div>
-
-          <div className="qf-admin-analytics-chip">
-            <span>Regular</span>
-            <strong>{totalRegular}</strong>
-          </div>
-
-          <div className="qf-admin-analytics-chip">
-            <span>Transactions</span>
-            <strong>{transactions.length}</strong>
-          </div>
-
-          <div className="qf-admin-analytics-chip">
-            <span>Avg Service</span>
-            <strong>{avgServiceSeconds}s</strong>
+            <div className="qf-admin-analytics-score-card">
+              <span>Avg Service</span>
+              <strong>{avgServiceSeconds}s</strong>
+              <p>{avgServiceMinutes} min average</p>
+            </div>
           </div>
         </div>
 
-        <div className="qf-admin-peak-card">
-          <div className="qf-admin-section-head">
-            <h3>Peak Hours Today</h3>
-            <span className="qf-admin-live-pill">Live Data</span>
-          </div>
+        <div className="qf-admin-analytics-main-grid">
+          {renderAnalyticsCard({
+            title: "Queue Status Distribution",
+            label: "Status Flow",
+            value: `${totalRequests} active`,
+            helper:
+              "Shows where the queue records are currently placed: pending, serving, paused, done, reset, or cancelled.",
+            children: renderBarList(statusDistributionData, true)
+          })}
 
-          {renderBarList(peakHourData)}
+          {renderAnalyticsCard({
+            title: "Active Queue Pressure",
+            label: "Office Load",
+            value: busiestActiveOffice?.label || "-",
+            helper:
+              "Highlights which office currently has the highest number of active queue tickets.",
+            children: renderBarList(activeQueuePressureData, true)
+          })}
 
-          <div className="qf-admin-insight-box">
-            <div className="qf-admin-insight-title">AI Insight</div>
-            <p>{peakInsight}</p>
+          {renderAnalyticsCard({
+            title: "Office Queue Volume",
+            label: "Demand",
+            value: topDepartment?.label || "-",
+            helper:
+              "Shows total generated queue tickets per office to identify which service area receives the most demand.",
+            children: renderBarList(departmentSummaryData, true)
+          })}
+
+          {renderAnalyticsCard({
+            title: "Peak Hours Today",
+            label: "Time Pattern",
+            value: [...peakHourData].sort((a, b) => b.value - a.value)[0]?.label || "-",
+            helper: peakInsight,
+            children: renderBarList(peakHourData, true)
+          })}
+        </div>
+
+        <div className="qf-admin-analytics-donut-grid">
+          {renderDonutMetric({
+            label: "Completed Tickets",
+            value: totalDone,
+            total: totalTickets,
+            helper: "Percentage of queue tickets already completed.",
+            className: "done"
+          })}
+
+          {renderDonutMetric({
+            label: "Active Tickets",
+            value: totalRequests,
+            total: totalTickets,
+            helper: "Tickets still pending, serving, or paused.",
+            className: "active"
+          })}
+
+          {renderDonutMetric({
+            label: "Priority Lane",
+            value: totalPriority,
+            total: totalTickets,
+            helper: "Share of tickets using the priority lane.",
+            className: "priority"
+          })}
+        </div>
+
+        <div className="qf-admin-analytics-main-grid">
+          {renderAnalyticsCard({
+            title: "Regular vs Priority Lane",
+            label: "Lane Usage",
+            value: `${totalRegular}/${totalPriority}`,
+            helper:
+              "Compares how many tickets are generated under Regular and Priority lanes.",
+            children: renderBarList(laneDistributionData, true)
+          })}
+
+          {renderAnalyticsCard({
+            title: "Transactions by Office",
+            label: "Service Output",
+            value: `${transactions.length} total`,
+            helper:
+              "Shows which offices have already completed service transactions.",
+            children: renderBarList(transactionByOfficeData, true)
+          })}
+
+          {renderAnalyticsCard({
+            title: "Average Service Time",
+            label: "Speed",
+            value: `${avgServiceSeconds}s`,
+            helper:
+              "Shows average service duration per office based on completed transactions.",
+            children: renderBarList(serviceSpeedByOfficeData, true)
+          })}
+
+          <div className="qf-admin-analytics-visual-card qf-admin-analytics-table-card">
+            <div className="qf-admin-analytics-card-top">
+              <div>
+                <span>Office Snapshot</span>
+                <h3>Queue Breakdown</h3>
+              </div>
+
+              <strong>{departments.length}</strong>
+            </div>
+
+            <div className="qf-admin-office-breakdown-list">
+              {departments.map((dept) => {
+                const counts = getDepartmentCounts(dept.id);
+
+                return (
+                  <div key={dept.id} className="qf-admin-office-breakdown-row">
+                    <div>
+                      <strong>{dept.dept_name}</strong>
+                      <span>
+                        Regular {counts.regular} • Priority {counts.priority}
+                      </span>
+                    </div>
+
+                    <div className="qf-admin-office-breakdown-metrics">
+                      <span>{counts.pending} pending</span>
+                      <span>{counts.serving} serving</span>
+                      <span>{counts.done} done</span>
+                    </div>
+                  </div>
+                );
+              })}
+
+              {departments.length === 0 && (
+                <div className="qf-admin-empty-state">No office data available.</div>
+              )}
+            </div>
           </div>
         </div>
       </div>
@@ -1509,8 +1832,7 @@ function AdminDashboard() {
             </div>
             {renderBarList(statusDistributionData, true)}
             <p className="qf-admin-chart-summary">
-              Most queue records are currently shown by status so the admin can quickly
-              see pending, serving, completed, reset, and cancelled flow.
+              Queue records grouped by status for quick monitoring.
             </p>
           </div>
 
@@ -1610,7 +1932,9 @@ function AdminDashboard() {
                   <div key={log.id} className="qf-admin-mini-activity-item">
                     <strong>{log.ticketNumber}</strong>
                     <span>{log.userName}</span>
-                    <p>{log.department} • {log.status}</p>
+                    <p>
+                      {log.department} • {log.status}
+                    </p>
                   </div>
                 ))}
               </div>
@@ -1797,9 +2121,7 @@ function AdminDashboard() {
                     <p>{item.lane_type || "Regular"} Lane</p>
                   </div>
 
-                  <span className="qf-admin-status qf-admin-status-done">
-                    Done
-                  </span>
+                  <span className="qf-admin-status qf-admin-status-done">Done</span>
                 </div>
 
                 <div className="qf-admin-record-meta">
@@ -1925,10 +2247,7 @@ function AdminDashboard() {
         className="qf-admin-proof-overlay"
         onClick={() => setProofPreviewUser(null)}
       >
-        <div
-          className="qf-admin-proof-modal"
-          onClick={(e) => e.stopPropagation()}
-        >
+        <div className="qf-admin-proof-modal" onClick={(e) => e.stopPropagation()}>
           <div className="qf-admin-proof-modal-top">
             <div>
               <h3>Priority Proof Preview</h3>
@@ -1968,11 +2287,7 @@ function AdminDashboard() {
 
           <div className="qf-admin-proof-body">
             {proofType === "image" && (
-              <img
-                src={proofData}
-                alt="Priority Proof"
-                className="qf-admin-proof-image"
-              />
+              <img src={proofData} alt="Priority Proof" className="qf-admin-proof-image" />
             )}
 
             {proofType === "pdf" && (
