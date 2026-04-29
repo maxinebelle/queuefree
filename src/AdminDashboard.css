@@ -300,7 +300,7 @@
   justify-content: center;
   text-decoration: none;
   white-space: nowrap;
-  transition: transform 0.2s ease, opacity 0.2s ease;
+  transition: transform 0.2s ease, opacity 0.2s ease, box-shadow 0.2s ease, border-color 0.2s ease;
 }
 
 .qf-admin-primary-btn:hover,
@@ -790,7 +790,6 @@
   overflow-wrap: anywhere;
 }
 
-/* UPDATED ANALYTICS DASHBOARD */
 .qf-admin-analytics-shell {
   background:
     radial-gradient(circle at top left, rgba(46, 168, 255, 0.14), transparent 30%),
@@ -1102,12 +1101,11 @@
   font-weight: 850;
 }
 
-/* SUMMARY REPORT */
 .qf-admin-summary-report-shell {
   background:
-    radial-gradient(circle at top left, rgba(46, 168, 255, 0.12), transparent 28%),
-    radial-gradient(circle at top right, rgba(139, 92, 246, 0.2), transparent 32%),
-    linear-gradient(180deg, rgba(5, 10, 18, 0.94), rgba(2, 5, 10, 0.98));
+    radial-gradient(circle at top left, rgba(46, 168, 255, 0.1), transparent 24%),
+    radial-gradient(circle at top right, rgba(139, 92, 246, 0.16), transparent 30%),
+    linear-gradient(180deg, rgba(5, 10, 18, 0.96), rgba(2, 5, 10, 0.99));
 }
 
 .qf-admin-report-title-row {
@@ -1117,8 +1115,95 @@
   gap: 16px;
 }
 
+.qf-admin-report-title-clean {
+  margin-bottom: 18px;
+}
+
 .qf-admin-report-title-row > div {
   min-width: 0;
+}
+
+.qf-admin-export-premium-btn {
+  min-width: 142px;
+  background:
+    linear-gradient(135deg, #14b8a6 0%, #0ea5e9 100%);
+  border: 1px solid rgba(125, 211, 252, 0.28);
+  box-shadow:
+    0 14px 28px rgba(14, 165, 233, 0.18),
+    inset 0 1px 0 rgba(255, 255, 255, 0.14);
+}
+
+.qf-admin-export-premium-btn:hover {
+  box-shadow:
+    0 16px 34px rgba(14, 165, 233, 0.24),
+    0 0 0 4px rgba(14, 165, 233, 0.08),
+    inset 0 1px 0 rgba(255, 255, 255, 0.14);
+}
+
+.qf-admin-report-filter-panel {
+  display: grid;
+  grid-template-columns: repeat(4, minmax(0, 1fr)) auto;
+  gap: 12px;
+  align-items: end;
+  padding: 16px;
+  margin-bottom: 16px;
+  border-radius: 22px;
+  background:
+    linear-gradient(180deg, rgba(255, 255, 255, 0.035), rgba(255, 255, 255, 0.012)),
+    rgba(11, 18, 32, 0.88);
+  border: 1px solid rgba(148, 163, 184, 0.12);
+  box-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.035);
+}
+
+.qf-admin-report-filter-group {
+  min-width: 0;
+}
+
+.qf-admin-report-filter-group label {
+  display: block;
+  margin-bottom: 8px;
+  color: #cbd5e1;
+  font-size: 11px;
+  font-weight: 950;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+}
+
+.qf-admin-report-select {
+  max-width: 100%;
+  height: 48px;
+  min-height: 48px;
+  background:
+    radial-gradient(circle at top right, rgba(46, 168, 255, 0.08), transparent 35%),
+    rgba(15, 23, 42, 0.94);
+  border-color: rgba(148, 163, 184, 0.16);
+}
+
+.qf-admin-report-select:focus,
+.qf-admin-text-input:focus,
+.qf-admin-select:focus {
+  border-color: rgba(46, 168, 255, 0.52);
+  box-shadow: 0 0 0 4px rgba(46, 168, 255, 0.08);
+}
+
+.qf-admin-clear-filter-btn {
+  height: 48px;
+  min-width: 92px;
+  padding: 0 16px;
+  border-radius: 999px;
+  border: 1px solid rgba(148, 163, 184, 0.18);
+  background: rgba(255, 255, 255, 0.045);
+  color: #cbd5e1;
+  font-size: 13px;
+  font-weight: 950;
+  cursor: pointer;
+  transition: 0.2s ease;
+}
+
+.qf-admin-clear-filter-btn:hover {
+  transform: translateY(-1px);
+  color: #ffffff;
+  background: rgba(255, 255, 255, 0.075);
 }
 
 .qf-admin-report-overview-panel {
@@ -1135,12 +1220,30 @@
   margin-bottom: 16px;
 }
 
+.qf-admin-report-overview-clean {
+  background:
+    radial-gradient(circle at top left, rgba(20, 184, 166, 0.12), transparent 34%),
+    radial-gradient(circle at top right, rgba(46, 168, 255, 0.12), transparent 36%),
+    linear-gradient(135deg, rgba(10, 18, 32, 0.94), rgba(5, 10, 20, 0.98));
+  border-color: rgba(45, 212, 191, 0.16);
+}
+
+.qf-admin-report-label {
+  display: block;
+  margin-bottom: 9px;
+  color: #7dd3fc;
+  font-size: 11px;
+  font-weight: 950;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+}
+
 .qf-admin-report-overview-panel h3 {
   margin: 0;
   color: #ffffff;
-  font-size: 24px;
+  font-size: 30px;
   font-weight: 950;
-  letter-spacing: -0.02em;
+  letter-spacing: -0.03em;
 }
 
 .qf-admin-report-overview-panel p {
@@ -1190,6 +1293,10 @@
   margin-bottom: 16px;
 }
 
+.qf-admin-report-kpi-clean {
+  margin-bottom: 16px;
+}
+
 .qf-admin-report-kpi-card {
   min-width: 0;
   padding: 17px;
@@ -1233,14 +1340,22 @@
   margin-bottom: 16px;
 }
 
+.qf-admin-report-main-visuals {
+  align-items: stretch;
+}
+
 .qf-admin-report-visual-card {
   min-width: 0;
   padding: 18px;
   border-radius: 23px;
   background:
-    radial-gradient(circle at top right, rgba(139, 92, 246, 0.1), transparent 35%),
+    radial-gradient(circle at top right, rgba(139, 92, 246, 0.08), transparent 35%),
+    linear-gradient(180deg, rgba(255, 255, 255, 0.028), rgba(255, 255, 255, 0.01)),
     rgba(11, 18, 32, 0.9);
   border: 1px solid rgba(148, 163, 184, 0.12);
+  box-shadow:
+    0 14px 28px rgba(0, 0, 0, 0.16),
+    inset 0 1px 0 rgba(255, 255, 255, 0.03);
 }
 
 .qf-admin-report-visual-card.no-margin {
@@ -1342,6 +1457,10 @@
   gap: 14px;
 }
 
+.qf-admin-report-bottom-clean {
+  margin-top: 0;
+}
+
 .compact-health {
   grid-template-columns: repeat(3, minmax(0, 1fr));
 }
@@ -1398,7 +1517,6 @@
   white-space: nowrap;
 }
 
-/* DRAWER */
 .qf-admin-drawer {
   position: fixed;
   top: 0;
@@ -1509,7 +1627,6 @@
   z-index: 1650;
 }
 
-/* PROOF MODAL */
 .qf-admin-proof-overlay {
   position: fixed;
   inset: 0;
@@ -1597,7 +1714,6 @@
   justify-content: flex-end;
 }
 
-/* RESPONSIVE */
 @media (max-width: 1200px) {
   .qf-admin-office-row {
     grid-template-columns: 1fr;
@@ -1625,6 +1741,14 @@
   .qf-admin-analytics-hero-grid,
   .qf-admin-analytics-main-grid {
     grid-template-columns: 1fr;
+  }
+
+  .qf-admin-report-filter-panel {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+  }
+
+  .qf-admin-clear-filter-btn {
+    width: 100%;
   }
 }
 
@@ -1697,7 +1821,8 @@
   .compact-health,
   .qf-admin-analytics-score-grid,
   .qf-admin-analytics-progress-grid,
-  .qf-admin-analytics-donut-grid {
+  .qf-admin-analytics-donut-grid,
+  .qf-admin-report-filter-panel {
     grid-template-columns: 1fr;
   }
 
@@ -1861,6 +1986,19 @@
   }
 
   .qf-admin-analytics-score-card strong {
+    font-size: 28px;
+  }
+
+  .qf-admin-report-overview-panel h3 {
+    font-size: 26px;
+  }
+
+  .qf-admin-report-filter-panel {
+    padding: 14px;
+    border-radius: 20px;
+  }
+
+  .qf-admin-report-kpi-card strong {
     font-size: 28px;
   }
 }

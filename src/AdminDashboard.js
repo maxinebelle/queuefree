@@ -40,6 +40,11 @@ function AdminDashboard() {
   const [staffWindowAssignments, setStaffWindowAssignments] = useState({});
   const [proofPreviewUser, setProofPreviewUser] = useState(null);
 
+  const [reportOfficeFilter, setReportOfficeFilter] = useState("all");
+  const [reportStatusFilter, setReportStatusFilter] = useState("all");
+  const [reportLaneFilter, setReportLaneFilter] = useState("all");
+  const [reportPeriodFilter, setReportPeriodFilter] = useState("all");
+
   const [newStaff, setNewStaff] = useState({
     first_name: "",
     last_name: "",
@@ -90,6 +95,32 @@ function AdminDashboard() {
     if (value?.seconds) return new Date(value.seconds * 1000);
     if (value instanceof Date) return value;
     return null;
+  }
+
+  function isWithinReportPeriod(value) {
+    if (reportPeriodFilter === "all") return true;
+
+    const dateObj = getDateFromFirestoreValue(value);
+    if (!dateObj) return false;
+
+    const now = new Date();
+    const start = new Date(now);
+
+    if (reportPeriodFilter === "today") {
+      return dateObj.toDateString() === now.toDateString();
+    }
+
+    if (reportPeriodFilter === "week") {
+      start.setDate(now.getDate() - 7);
+      return dateObj >= start && dateObj <= now;
+    }
+
+    if (reportPeriodFilter === "month") {
+      start.setMonth(now.getMonth() - 1);
+      return dateObj >= start && dateObj <= now;
+    }
+
+    return true;
   }
 
   function getProofType(proofData = "") {
@@ -361,6 +392,88 @@ function AdminDashboard() {
     (ticket) => (ticket.lane_type || "Regular") !== "Priority"
   ).length;
 
+  const filteredReportTickets = useMemo(() => {
+    return tickets.filter((ticket) => {
+      const deptName = ticket.dept_name || getDepartmentNameById(ticket.dept_id);
+      const status = ticket.status || "Pending";
+      const lane = ticket.lane_type || "Regular";
+
+      const officeOk = reportOfficeFilter === "all" || deptName === reportOfficeFilter;
+      const statusOk = reportStatusFilter === "all" || status === reportStatusFilter;
+      const laneOk = reportLaneFilter === "all" || lane === reportLaneFilter;
+      const periodOk = isWithinReportPeriod(ticket.created_at);
+
+      return officeOk && statusOk && laneOk && periodOk;
+    });
+  }, [
+    tickets,
+    departments,
+    reportOfficeFilter,
+    reportStatusFilter,
+    reportLaneFilter,
+    reportPeriodFilter
+  ]);
+
+  const filteredReportTransactions = useMemo(() => {
+    return transactions.filter((item) => {
+      const deptName = item.dept_name || getDepartmentNameById(item.dept_id);
+      const lane = item.lane_type || "Regular";
+
+      const officeOk = reportOfficeFilter === "all" || deptName === reportOfficeFilter;
+      const laneOk = reportLaneFilter === "all" || lane === reportLaneFilter;
+      const periodOk = isWithinReportPeriod(item.end_time);
+
+      return officeOk && laneOk && periodOk;
+    });
+  }, [
+    transactions,
+    departments,
+    reportOfficeFilter,
+    reportLaneFilter,
+    reportPeriodFilter
+  ]);
+
+  const reportTotalTickets = filteredReportTickets.length;
+
+  const reportTotalRequests = filteredReportTickets.filter(
+    (ticket) =>
+      ticket.status !== "Done" &&
+      ticket.status !== "Cancelled" &&
+      ticket.status !== "Reset"
+  ).length;
+
+  const reportTotalPending = filteredReportTickets.filter(
+    (ticket) => ticket.status === "Pending"
+  ).length;
+
+  const reportTotalServing = filteredReportTickets.filter(
+    (ticket) => ticket.status === "Serving"
+  ).length;
+
+  const reportTotalPaused = filteredReportTickets.filter(
+    (ticket) => ticket.status === "Paused"
+  ).length;
+
+  const reportTotalDone = filteredReportTickets.filter(
+    (ticket) => ticket.status === "Done"
+  ).length;
+
+  const reportTotalReset = filteredReportTickets.filter(
+    (ticket) => ticket.status === "Reset"
+  ).length;
+
+  const reportTotalCancelled = filteredReportTickets.filter(
+    (ticket) => ticket.status === "Cancelled"
+  ).length;
+
+  const reportTotalPriority = filteredReportTickets.filter(
+    (ticket) => (ticket.lane_type || "Regular") === "Priority"
+  ).length;
+
+  const reportTotalRegular = filteredReportTickets.filter(
+    (ticket) => (ticket.lane_type || "Regular") !== "Priority"
+  ).length;
+
   const userAccounts = useMemo(() => {
     return users.filter((user) => (user.role || "").toLowerCase() === "user");
   }, [users]);
@@ -434,10 +547,26 @@ function AdminDashboard() {
     return Math.round(totalSeconds / transactions.length);
   }, [transactions]);
 
+  const reportAvgServiceSeconds = useMemo(() => {
+    if (filteredReportTransactions.length === 0) return 0;
+
+    const totalSeconds = filteredReportTransactions.reduce(
+      (sum, item) => sum + Number(item.duration_sec || 0),
+      0
+    );
+
+    return Math.round(totalSeconds / filteredReportTransactions.length);
+  }, [filteredReportTransactions]);
+
   const avgServiceMinutes = useMemo(() => {
     if (!avgServiceSeconds) return 0;
     return Math.max(1, Math.round(avgServiceSeconds / 60));
   }, [avgServiceSeconds]);
+
+  const reportAvgServiceMinutes = useMemo(() => {
+    if (!reportAvgServiceSeconds) return 0;
+    return Math.max(1, Math.round(reportAvgServiceSeconds / 60));
+  }, [reportAvgServiceSeconds]);
 
   const completionRate = useMemo(() => {
     if (!totalTickets) return 0;
@@ -454,8 +583,44 @@ function AdminDashboard() {
     return Math.round((totalPriority / totalTickets) * 100);
   }, [totalPriority, totalTickets]);
 
+  const reportCompletionRate = useMemo(() => {
+    if (!reportTotalTickets) return 0;
+    return Math.round((reportTotalDone / reportTotalTickets) * 100);
+  }, [reportTotalDone, reportTotalTickets]);
+
+  const reportPriorityRate = useMemo(() => {
+    if (!reportTotalTickets) return 0;
+    return Math.round((reportTotalPriority / reportTotalTickets) * 100);
+  }, [reportTotalPriority, reportTotalTickets]);
+
   const getDepartmentCounts = (deptId) => {
     const deptTickets = tickets.filter((ticket) => ticket.dept_id === deptId);
+
+    return {
+      pending: deptTickets.filter((ticket) => ticket.status === "Pending").length,
+      serving: deptTickets.filter((ticket) => ticket.status === "Serving").length,
+      paused: deptTickets.filter((ticket) => ticket.status === "Paused").length,
+      done: deptTickets.filter((ticket) => ticket.status === "Done").length,
+      reset: deptTickets.filter((ticket) => ticket.status === "Reset").length,
+      cancelled: deptTickets.filter((ticket) => ticket.status === "Cancelled").length,
+      active: deptTickets.filter(
+        (ticket) =>
+          ticket.status !== "Done" &&
+          ticket.status !== "Cancelled" &&
+          ticket.status !== "Reset"
+      ).length,
+      regular: deptTickets.filter(
+        (ticket) => (ticket.lane_type || "Regular") !== "Priority"
+      ).length,
+      priority: deptTickets.filter(
+        (ticket) => (ticket.lane_type || "Regular") === "Priority"
+      ).length,
+      total: deptTickets.length
+    };
+  };
+
+  const getReportDepartmentCounts = (deptId) => {
+    const deptTickets = filteredReportTickets.filter((ticket) => ticket.dept_id === deptId);
 
     return {
       pending: deptTickets.filter((ticket) => ticket.status === "Pending").length,
@@ -524,6 +689,30 @@ function AdminDashboard() {
       });
   }, [tickets, users, departments]);
 
+  const reportUserActivityLogs = useMemo(() => {
+    return filteredReportTickets
+      .sort((a, b) => {
+        const aTime = a.created_at?.seconds || 0;
+        const bTime = b.created_at?.seconds || 0;
+        return bTime - aTime;
+      })
+      .slice(0, 30)
+      .map((ticket) => {
+        const linkedUser = getUserById(ticket.user_id);
+
+        return {
+          id: ticket.id,
+          userName: getFullName(linkedUser),
+          email: linkedUser?.email || "-",
+          action: `Generated ${ticket.lane_type || "Regular"} queue ticket`,
+          ticketNumber: ticket.ticket_number || "-",
+          department: ticket.dept_name || getDepartmentNameById(ticket.dept_id),
+          status: ticket.status || "Pending",
+          createdAt: getReadableDateTime(ticket.created_at)
+        };
+      });
+  }, [filteredReportTickets, users, departments]);
+
   const hourlyBuckets = useMemo(() => {
     const buckets = {
       "8 AM": 0,
@@ -557,6 +746,39 @@ function AdminDashboard() {
     return buckets;
   }, [tickets]);
 
+  const reportHourlyBuckets = useMemo(() => {
+    const buckets = {
+      "8 AM": 0,
+      "9 AM": 0,
+      "10 AM": 0,
+      "11 AM": 0,
+      "12 PM": 0,
+      "1 PM": 0,
+      "2 PM": 0,
+      "3 PM": 0,
+      "4 PM": 0
+    };
+
+    filteredReportTickets.forEach((ticket) => {
+      const dateObj = getDateFromFirestoreValue(ticket.created_at);
+      if (!dateObj) return;
+
+      const hour = dateObj.getHours();
+
+      if (hour === 8) buckets["8 AM"] += 1;
+      else if (hour === 9) buckets["9 AM"] += 1;
+      else if (hour === 10) buckets["10 AM"] += 1;
+      else if (hour === 11) buckets["11 AM"] += 1;
+      else if (hour === 12) buckets["12 PM"] += 1;
+      else if (hour === 13) buckets["1 PM"] += 1;
+      else if (hour === 14) buckets["2 PM"] += 1;
+      else if (hour === 15) buckets["3 PM"] += 1;
+      else if (hour === 16) buckets["4 PM"] += 1;
+    });
+
+    return buckets;
+  }, [filteredReportTickets]);
+
   const getPercent = (value, total) => {
     if (!total) return 0;
     return Math.round((Number(value || 0) / total) * 100);
@@ -580,6 +802,15 @@ function AdminDashboard() {
     );
   }, [hourlyBuckets]);
 
+  const reportPeakHourData = useMemo(() => {
+    return makeBarData(
+      Object.entries(reportHourlyBuckets).map(([label, value]) => ({
+        label,
+        value
+      }))
+    );
+  }, [reportHourlyBuckets]);
+
   const departmentSummaryData = useMemo(() => {
     return makeBarData(
       departments.map((dept) => {
@@ -598,6 +829,27 @@ function AdminDashboard() {
       })
     );
   }, [departments, tickets]);
+
+  const reportDepartmentSummaryData = useMemo(() => {
+    return makeBarData(
+      departments
+        .filter((dept) => reportOfficeFilter === "all" || dept.dept_name === reportOfficeFilter)
+        .map((dept) => {
+          const counts = getReportDepartmentCounts(dept.id);
+
+          return {
+            label: dept.dept_name || "Office",
+            value: counts.total,
+            active: counts.active,
+            pending: counts.pending,
+            serving: counts.serving,
+            done: counts.done,
+            priority: counts.priority,
+            regular: counts.regular
+          };
+        })
+    );
+  }, [departments, filteredReportTickets, reportOfficeFilter]);
 
   const activeQueuePressureData = useMemo(() => {
     return makeBarData(
@@ -627,6 +879,24 @@ function AdminDashboard() {
     ]);
   }, [totalPending, totalServing, totalPaused, totalDone, totalReset, totalCancelled]);
 
+  const reportStatusDistributionData = useMemo(() => {
+    return makeBarData([
+      { label: "Pending", value: reportTotalPending, className: "qf-admin-bar-pending" },
+      { label: "Serving", value: reportTotalServing, className: "qf-admin-bar-serving" },
+      { label: "Paused", value: reportTotalPaused, className: "qf-admin-bar-paused" },
+      { label: "Done", value: reportTotalDone, className: "qf-admin-bar-done" },
+      { label: "Reset", value: reportTotalReset, className: "qf-admin-bar-reset" },
+      { label: "Cancelled", value: reportTotalCancelled, className: "qf-admin-bar-cancelled" }
+    ]);
+  }, [
+    reportTotalPending,
+    reportTotalServing,
+    reportTotalPaused,
+    reportTotalDone,
+    reportTotalReset,
+    reportTotalCancelled
+  ]);
+
   const laneDistributionData = useMemo(() => {
     return makeBarData([
       {
@@ -641,6 +911,21 @@ function AdminDashboard() {
       }
     ]);
   }, [totalRegular, totalPriority]);
+
+  const reportLaneDistributionData = useMemo(() => {
+    return makeBarData([
+      {
+        label: "Regular",
+        value: reportTotalRegular,
+        className: "qf-admin-bar-regular"
+      },
+      {
+        label: "Priority",
+        value: reportTotalPriority,
+        className: "qf-admin-bar-priority"
+      }
+    ]);
+  }, [reportTotalRegular, reportTotalPriority]);
 
   const transactionByOfficeData = useMemo(() => {
     const map = {};
@@ -703,6 +988,11 @@ function AdminDashboard() {
     return [...departmentSummaryData].sort((a, b) => b.value - a.value)[0];
   }, [departmentSummaryData]);
 
+  const reportTopDepartment = useMemo(() => {
+    if (reportDepartmentSummaryData.length === 0) return null;
+    return [...reportDepartmentSummaryData].sort((a, b) => b.value - a.value)[0];
+  }, [reportDepartmentSummaryData]);
+
   const busiestActiveOffice = useMemo(() => {
     if (activeQueuePressureData.length === 0) return null;
     return [...activeQueuePressureData].sort((a, b) => b.value - a.value)[0];
@@ -726,6 +1016,24 @@ function AdminDashboard() {
     }.`;
   }, [peakHourData]);
 
+  const reportPeakInsight = useMemo(() => {
+    const sorted = [...reportPeakHourData].sort((a, b) => b.value - a.value);
+
+    if (!sorted.length) {
+      return "No queue data matches the selected filters yet.";
+    }
+
+    const top = sorted[0];
+
+    if (top.value === 0) {
+      return "No peak hour found for the selected filters.";
+    }
+
+    return `${top.label} has the highest activity in this filtered report with ${top.value} ticket${
+      top.value === 1 ? "" : "s"
+    }.`;
+  }, [reportPeakHourData]);
+
   const analyticsInsight = useMemo(() => {
     if (totalTickets === 0) {
       return "No queue activity yet. Analytics will update automatically once users generate queue tickets.";
@@ -744,17 +1052,28 @@ function AdminDashboard() {
   ]);
 
   const summaryInsight = useMemo(() => {
-    const activePercent = getPercent(totalRequests, totalTickets);
-    const donePercent = getPercent(totalDone, totalTickets);
-    const priorityPercent = getPercent(totalPriority, totalTickets);
-    const busiestOffice = topDepartment?.label || "No office yet";
+    const activePercent = getPercent(reportTotalRequests, reportTotalTickets);
+    const donePercent = getPercent(reportTotalDone, reportTotalTickets);
+    const priorityPercent = getPercent(reportTotalPriority, reportTotalTickets);
+    const busiestOffice = reportTopDepartment?.label || "No office yet";
 
-    if (totalTickets === 0) {
-      return "QueueFree has no queue records yet. Once users start generating queue numbers, this summary report will automatically show queue volume, service completion, priority usage, and activity trends.";
+    if (reportTotalTickets === 0) {
+      return "No queue records match the selected filters yet. Change the filters or wait for new queue activity to appear in the report.";
     }
 
-    return `QueueFree currently records ${totalTickets} total tickets, with ${activePercent}% still active and ${donePercent}% completed. ${busiestOffice} has the highest queue volume so far. Priority lane usage is ${priorityPercent}% of all tickets, while ${transactions.length} completed service transactions are available for service-time analysis.`;
-  }, [totalTickets, totalRequests, totalDone, totalPriority, topDepartment, transactions.length]);
+    return `This report shows ${reportTotalTickets} queue ticket${
+      reportTotalTickets === 1 ? "" : "s"
+    }, with ${activePercent}% still active and ${donePercent}% completed. ${busiestOffice} has the highest queue volume in this view. Priority lane usage is ${priorityPercent}%, with ${filteredReportTransactions.length} related service transaction${
+      filteredReportTransactions.length === 1 ? "" : "s"
+    } available for service-time review.`;
+  }, [
+    reportTotalTickets,
+    reportTotalRequests,
+    reportTotalDone,
+    reportTotalPriority,
+    reportTopDepartment,
+    filteredReportTransactions.length
+  ]);
 
   const systemHealthLabel = useMemo(() => {
     if (totalTickets === 0) return "No Data";
@@ -763,18 +1082,44 @@ function AdminDashboard() {
     return "Stable";
   }, [totalTickets, totalPending, totalDone, totalServing]);
 
+  const reportHealthLabel = useMemo(() => {
+    if (reportTotalTickets === 0) return "No Data";
+    if (reportTotalPending >= 10) return "Busy";
+    if (reportTotalServing > 0 || reportTotalPending > 0) return "Active";
+    return "Stable";
+  }, [reportTotalTickets, reportTotalPending, reportTotalServing]);
+
+  const handleClearReportFilters = () => {
+    setReportOfficeFilter("all");
+    setReportStatusFilter("all");
+    setReportLaneFilter("all");
+    setReportPeriodFilter("all");
+  };
+
   const handleExportSummaryCsv = () => {
     const rows = [];
+
+    rows.push({
+      Section: "Filtered Summary",
+      Name: "Report Filters",
+      MetricA: "Office",
+      ValueA: reportOfficeFilter === "all" ? "All Offices" : reportOfficeFilter,
+      MetricB: "Status",
+      ValueB: reportStatusFilter === "all" ? "All Statuses" : reportStatusFilter,
+      MetricC: "Lane",
+      ValueC: reportLaneFilter === "all" ? "All Lanes" : reportLaneFilter,
+      Notes: `Period: ${reportPeriodFilter}`
+    });
 
     rows.push({
       Section: "Overall Summary",
       Name: "System Totals",
       MetricA: "Total Tickets",
-      ValueA: totalTickets,
+      ValueA: reportTotalTickets,
       MetricB: "Active Queues",
-      ValueB: totalRequests,
+      ValueB: reportTotalRequests,
       MetricC: "Transactions",
-      ValueC: transactions.length,
+      ValueC: filteredReportTransactions.length,
       Notes: summaryInsight
     });
 
@@ -794,21 +1139,21 @@ function AdminDashboard() {
       Section: "Queue Status",
       Name: "Status Distribution",
       MetricA: "Pending",
-      ValueA: totalPending,
+      ValueA: reportTotalPending,
       MetricB: "Serving",
-      ValueB: totalServing,
+      ValueB: reportTotalServing,
       MetricC: "Done",
-      ValueC: totalDone,
-      Notes: `Paused: ${totalPaused}; Reset: ${totalReset}; Cancelled: ${totalCancelled}`
+      ValueC: reportTotalDone,
+      Notes: `Paused: ${reportTotalPaused}; Reset: ${reportTotalReset}; Cancelled: ${reportTotalCancelled}`
     });
 
     rows.push({
       Section: "Lane Report",
       Name: "Regular vs Priority",
       MetricA: "Regular Tickets",
-      ValueA: totalRegular,
+      ValueA: reportTotalRegular,
       MetricB: "Priority Tickets",
-      ValueB: totalPriority,
+      ValueB: reportTotalPriority,
       MetricC: "Approved Priority Users",
       ValueC: approvedPriorityUsers.length,
       Notes: `Pending priority requests: ${pendingPriorityUsers.length}; Rejected priority requests: ${rejectedPriorityUsers.length}`
@@ -818,31 +1163,33 @@ function AdminDashboard() {
       Section: "Transaction History",
       Name: "Service Records",
       MetricA: "Transactions",
-      ValueA: transactions.length,
+      ValueA: filteredReportTransactions.length,
       MetricB: "Average Service Seconds",
-      ValueB: avgServiceSeconds,
+      ValueB: reportAvgServiceSeconds,
       MetricC: "Average Service Minutes",
-      ValueC: avgServiceMinutes,
-      Notes: "Based on completed service records stored in the transactions collection."
+      ValueC: reportAvgServiceMinutes,
+      Notes: "Based on completed service records that match the report filters."
     });
 
-    departments.forEach((dept) => {
-      const counts = getDepartmentCounts(dept.id);
+    departments
+      .filter((dept) => reportOfficeFilter === "all" || dept.dept_name === reportOfficeFilter)
+      .forEach((dept) => {
+        const counts = getReportDepartmentCounts(dept.id);
 
-      rows.push({
-        Section: "Department Summary",
-        Name: dept.dept_name || "Office",
-        MetricA: "Total Tickets",
-        ValueA: counts.total,
-        MetricB: "Active Tickets",
-        ValueB: counts.active,
-        MetricC: "Completed Tickets",
-        ValueC: counts.done,
-        Notes: `Pending: ${counts.pending}; Serving: ${counts.serving}; Paused: ${counts.paused}; Regular: ${counts.regular}; Priority: ${counts.priority}; Regular now serving: ${normalizeNowServingDisplay(dept.regular_now_serving_display)}; Priority now serving: ${normalizeNowServingDisplay(dept.priority_now_serving_display)}`
+        rows.push({
+          Section: "Department Summary",
+          Name: dept.dept_name || "Office",
+          MetricA: "Total Tickets",
+          ValueA: counts.total,
+          MetricB: "Active Tickets",
+          ValueB: counts.active,
+          MetricC: "Completed Tickets",
+          ValueC: counts.done,
+          Notes: `Pending: ${counts.pending}; Serving: ${counts.serving}; Paused: ${counts.paused}; Regular: ${counts.regular}; Priority: ${counts.priority}; Regular now serving: ${normalizeNowServingDisplay(dept.regular_now_serving_display)}; Priority now serving: ${normalizeNowServingDisplay(dept.priority_now_serving_display)}`
+        });
       });
-    });
 
-    userActivityLogs.slice(0, 12).forEach((log) => {
+    reportUserActivityLogs.slice(0, 12).forEach((log) => {
       rows.push({
         Section: "User Activity Logs",
         Name: log.userName,
@@ -856,7 +1203,7 @@ function AdminDashboard() {
       });
     });
 
-    downloadCsv("queuefree-complete-summary-report.csv", rows);
+    downloadCsv("queuefree-filtered-summary-report.csv", rows);
   };
 
   const handleExportTransactionsCsv = () => {
@@ -1754,144 +2101,208 @@ function AdminDashboard() {
   const renderReportsSection = () => (
     <div className="qf-admin-content-grid">
       <div className="qf-admin-section-card qf-admin-summary-report-shell">
-        <div className="qf-admin-section-headline qf-admin-report-title-row">
+        <div className="qf-admin-section-headline qf-admin-report-title-row qf-admin-report-title-clean">
           <div>
             <h2>Summary Reports</h2>
             <p>
-              One summarized report for the whole QueueFree system with visual analytics,
-              queue status, transactions, priority lane usage, and recent user activity.
+              Filtered queue report with clear totals, visual trends, transactions,
+              priority lane usage, and recent user activity.
             </p>
           </div>
 
           <button
             type="button"
-            className="qf-admin-report-btn"
+            className="qf-admin-report-btn qf-admin-export-premium-btn"
             onClick={handleExportSummaryCsv}
           >
-            Export Complete CSV
+            Export CSV
           </button>
         </div>
 
-        <div className="qf-admin-report-overview-panel">
+        <div className="qf-admin-report-filter-panel">
+          <div className="qf-admin-report-filter-group">
+            <label htmlFor="report-office-filter">Office</label>
+            <select
+              id="report-office-filter"
+              name="report-office-filter"
+              className="qf-admin-select qf-admin-report-select"
+              value={reportOfficeFilter}
+              onChange={(e) => setReportOfficeFilter(e.target.value)}
+            >
+              <option value="all">All Offices</option>
+              {DEPARTMENT_NAMES.map((deptName) => (
+                <option key={deptName} value={deptName}>
+                  {deptName}
+                </option>
+              ))}
+            </select>
+          </div>
+
+          <div className="qf-admin-report-filter-group">
+            <label htmlFor="report-status-filter">Status</label>
+            <select
+              id="report-status-filter"
+              name="report-status-filter"
+              className="qf-admin-select qf-admin-report-select"
+              value={reportStatusFilter}
+              onChange={(e) => setReportStatusFilter(e.target.value)}
+            >
+              <option value="all">All Status</option>
+              <option value="Pending">Pending</option>
+              <option value="Serving">Serving</option>
+              <option value="Paused">Paused</option>
+              <option value="Done">Done</option>
+              <option value="Reset">Reset</option>
+              <option value="Cancelled">Cancelled</option>
+            </select>
+          </div>
+
+          <div className="qf-admin-report-filter-group">
+            <label htmlFor="report-lane-filter">Lane</label>
+            <select
+              id="report-lane-filter"
+              name="report-lane-filter"
+              className="qf-admin-select qf-admin-report-select"
+              value={reportLaneFilter}
+              onChange={(e) => setReportLaneFilter(e.target.value)}
+            >
+              <option value="all">All Lanes</option>
+              <option value="Regular">Regular</option>
+              <option value="Priority">Priority</option>
+            </select>
+          </div>
+
+          <div className="qf-admin-report-filter-group">
+            <label htmlFor="report-period-filter">Period</label>
+            <select
+              id="report-period-filter"
+              name="report-period-filter"
+              className="qf-admin-select qf-admin-report-select"
+              value={reportPeriodFilter}
+              onChange={(e) => setReportPeriodFilter(e.target.value)}
+            >
+              <option value="all">All Time</option>
+              <option value="today">Today</option>
+              <option value="week">Last 7 Days</option>
+              <option value="month">Last 30 Days</option>
+            </select>
+          </div>
+
+          <button
+            type="button"
+            className="qf-admin-clear-filter-btn"
+            onClick={handleClearReportFilters}
+          >
+            Clear
+          </button>
+        </div>
+
+        <div className="qf-admin-report-overview-panel qf-admin-report-overview-clean">
           <div>
-            <h3>QueueFree System Snapshot</h3>
+            <span className="qf-admin-report-label">Report Snapshot</span>
+            <h3>{reportHealthLabel}</h3>
             <p>{summaryInsight}</p>
           </div>
 
           <div className="qf-admin-report-health-grid">
             <div>
-              <span>System Status</span>
-              <strong>{systemHealthLabel}</strong>
+              <span>Total Shown</span>
+              <strong>{reportTotalTickets}</strong>
             </div>
 
             <div>
               <span>Busiest Office</span>
-              <strong>{topDepartment?.label || "-"}</strong>
+              <strong>{reportTopDepartment?.label || "-"}</strong>
             </div>
 
             <div>
               <span>Peak Hour</span>
               <strong>
-                {[...peakHourData].sort((a, b) => b.value - a.value)[0]?.label || "-"}
+                {[...reportPeakHourData].sort((a, b) => b.value - a.value)[0]?.label ||
+                  "-"}
               </strong>
             </div>
           </div>
         </div>
 
-        <div className="qf-admin-report-kpi-grid">
+        <div className="qf-admin-report-kpi-grid qf-admin-report-kpi-clean">
           <div className="qf-admin-report-kpi-card">
             <span>Total Tickets</span>
-            <strong>{totalTickets}</strong>
-            <p>{totalRequests} active queues</p>
+            <strong>{reportTotalTickets}</strong>
+            <p>{reportTotalRequests} active queue{reportTotalRequests === 1 ? "" : "s"}</p>
           </div>
 
           <div className="qf-admin-report-kpi-card">
-            <span>Transactions</span>
-            <strong>{transactions.length}</strong>
-            <p>{avgServiceSeconds}s avg service</p>
-          </div>
-
-          <div className="qf-admin-report-kpi-card">
-            <span>User Activities</span>
-            <strong>{userActivityLogs.length}</strong>
-            <p>recent queue actions</p>
+            <span>Completed</span>
+            <strong>{reportTotalDone}</strong>
+            <p>{reportCompletionRate}% completion rate</p>
           </div>
 
           <div className="qf-admin-report-kpi-card">
             <span>Priority Tickets</span>
-            <strong>{totalPriority}</strong>
-            <p>{approvedPriorityUsers.length} approved priority users</p>
+            <strong>{reportTotalPriority}</strong>
+            <p>{reportPriorityRate}% priority usage</p>
+          </div>
+
+          <div className="qf-admin-report-kpi-card">
+            <span>Transactions</span>
+            <strong>{filteredReportTransactions.length}</strong>
+            <p>{reportAvgServiceSeconds}s avg service</p>
           </div>
         </div>
 
-        <div className="qf-admin-report-visual-grid">
+        <div className="qf-admin-report-visual-grid qf-admin-report-main-visuals">
           <div className="qf-admin-report-visual-card">
             <div className="qf-admin-chart-head">
-              <h4>Queue Status Distribution</h4>
-              <span>{totalTickets} total</span>
+              <h4>Queue Status</h4>
+              <span>{reportTotalTickets} total</span>
             </div>
-            {renderBarList(statusDistributionData, true)}
+            {renderBarList(reportStatusDistributionData, true)}
             <p className="qf-admin-chart-summary">
-              Queue records grouped by status for quick monitoring.
+              A quick view of pending, serving, paused, completed, reset, and cancelled
+              queue tickets.
             </p>
           </div>
 
           <div className="qf-admin-report-visual-card">
             <div className="qf-admin-chart-head">
               <h4>Office Queue Volume</h4>
-              <span>{departments.length} offices</span>
+              <span>{reportDepartmentSummaryData.length} office{reportDepartmentSummaryData.length === 1 ? "" : "s"}</span>
             </div>
-            {renderBarList(departmentSummaryData, true)}
+            {renderBarList(reportDepartmentSummaryData, true)}
             <p className="qf-admin-chart-summary">
-              {topDepartment?.label || "No office"} currently has the highest recorded
-              activity based on total generated tickets.
+              {reportTopDepartment?.label || "No office"} has the highest ticket count in
+              this selected report.
             </p>
           </div>
 
           <div className="qf-admin-report-visual-card">
             <div className="qf-admin-chart-head">
-              <h4>Regular vs Priority</h4>
-              <span>Lane usage</span>
+              <h4>Lane Usage</h4>
+              <span>Regular / Priority</span>
             </div>
-
-            <div className="qf-admin-lane-visual-list">
-              <div className="qf-admin-lane-visual regular">
-                <div className="qf-admin-lane-circle">
-                  <strong>{getPercent(totalRegular, totalTickets)}%</strong>
-                </div>
-                <div>
-                  <h4>Regular Lane</h4>
-                  <p>{totalRegular} tickets generated under regular queue flow.</p>
-                </div>
-              </div>
-
-              <div className="qf-admin-lane-visual priority">
-                <div className="qf-admin-lane-circle">
-                  <strong>{getPercent(totalPriority, totalTickets)}%</strong>
-                </div>
-                <div>
-                  <h4>Priority Lane</h4>
-                  <p>{totalPriority} tickets generated for approved priority access.</p>
-                </div>
-              </div>
-            </div>
+            {renderBarList(reportLaneDistributionData, true)}
+            <p className="qf-admin-chart-summary">
+              Regular tickets total {reportTotalRegular}, while priority tickets total{" "}
+              {reportTotalPriority}.
+            </p>
           </div>
 
           <div className="qf-admin-report-visual-card">
             <div className="qf-admin-chart-head">
               <h4>Peak Hour Pattern</h4>
-              <span>Today</span>
+              <span>Filtered</span>
             </div>
-            {renderBarList(peakHourData, true)}
-            <p className="qf-admin-chart-summary">{peakInsight}</p>
+            {renderBarList(reportPeakHourData, true)}
+            <p className="qf-admin-chart-summary">{reportPeakInsight}</p>
           </div>
         </div>
 
-        <div className="qf-admin-report-bottom-grid">
+        <div className="qf-admin-report-bottom-grid qf-admin-report-bottom-clean">
           <div className="qf-admin-report-visual-card no-margin">
             <div className="qf-admin-chart-head">
-              <h4>Priority Request Summary</h4>
-              <span>User verification</span>
+              <h4>Priority Requests</h4>
+              <span>Verification</span>
             </div>
 
             <div className="qf-admin-report-health-grid compact-health">
@@ -1924,11 +2335,11 @@ function AdminDashboard() {
               </button>
             </div>
 
-            {userActivityLogs.length === 0 ? (
-              <div className="qf-admin-empty-state">No recent user activity yet.</div>
+            {reportUserActivityLogs.length === 0 ? (
+              <div className="qf-admin-empty-state">No activity matches the filters.</div>
             ) : (
               <div className="qf-admin-mini-activity-list">
-                {userActivityLogs.slice(0, 5).map((log) => (
+                {reportUserActivityLogs.slice(0, 5).map((log) => (
                   <div key={log.id} className="qf-admin-mini-activity-item">
                     <strong>{log.ticketNumber}</strong>
                     <span>{log.userName}</span>
