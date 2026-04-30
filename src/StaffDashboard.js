@@ -42,12 +42,8 @@ function StaffDashboard() {
     "Staff";
 
   const availableDepartments = useMemo(() => {
-    if (assignedOffice && DEPARTMENT_NAMES.includes(assignedOffice)) {
-      return [assignedOffice];
-    }
-
     return DEPARTMENT_NAMES;
-  }, [assignedOffice]);
+  }, []);
 
   const getStaffWindowDocId = (officeName, windowName) => {
     const safeOffice = String(officeName || "UnknownOffice")
@@ -265,7 +261,7 @@ function StaffDashboard() {
     try {
       if (!currentUser?.uid) return;
 
-      const officeValue = assignedOffice || selectedDeptName;
+      const officeValue = selectedDeptName || assignedOffice || "Registrar";
       const windowValue = assignedWindow || "Window 1";
 
       if (!officeValue || !windowValue) return;
@@ -279,6 +275,7 @@ function StaffDashboard() {
           window_assignment: windowValue,
           staff_uid: currentUser.uid,
           staff_name: staffDisplayName,
+          staff_email: currentUser?.email || "",
           is_active: true,
           account_status: currentUser?.account_status || "active",
           updated_at: serverTimestamp()
@@ -287,6 +284,7 @@ function StaffDashboard() {
       );
     } catch (error) {
       console.error("SYNC STAFF WINDOW ERROR:", error);
+      throw error;
     }
   };
 
@@ -309,7 +307,11 @@ function StaffDashboard() {
   }, [assignedOffice]);
 
   useEffect(() => {
-    syncStaffWindowRecord();
+    if (!currentUser?.uid) return;
+
+    syncStaffWindowRecord().catch((error) => {
+      console.error("Initial staff window sync failed:", error);
+    });
   }, [
     currentUser?.uid,
     currentUser?.account_status,
@@ -1041,7 +1043,6 @@ function StaffDashboard() {
             value={selectedDeptName}
             onChange={(e) => setSelectedDeptName(e.target.value)}
             className="qf-staff-select"
-            disabled={availableDepartments.length === 1}
           >
             {availableDepartments.map((deptName) => (
               <option key={deptName} value={deptName}>
