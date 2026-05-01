@@ -20,7 +20,15 @@ const DEPARTMENT_NAMES = ["Registrar", "Cashier", "Accounting", "EDP"];
 function StaffDashboard() {
   const { currentUser } = useAuth();
 
-  const [selectedDeptName, setSelectedDeptName] = useState("Registrar");
+  const assignedOffice = currentUser?.office_assignment || "";
+  const assignedWindow = currentUser?.window_assignment || "Window 1";
+
+  const [selectedDeptName, setSelectedDeptName] = useState(
+    assignedOffice && DEPARTMENT_NAMES.includes(assignedOffice)
+      ? assignedOffice
+      : "Registrar"
+  );
+
   const [departmentData, setDepartmentData] = useState({});
   const [tickets, setTickets] = useState([]);
   const [usersMap, setUsersMap] = useState({});
@@ -33,17 +41,15 @@ function StaffDashboard() {
   const [processingPause, setProcessingPause] = useState(false);
   const [processingResume, setProcessingResume] = useState(false);
 
-  const assignedOffice = currentUser?.office_assignment || "";
-  const assignedWindow = currentUser?.window_assignment || "Window 1";
-
   const staffDisplayName =
     `${currentUser?.first_name || ""} ${currentUser?.last_name || ""}`.trim() ||
     currentUser?.email?.split("@")[0] ||
     "Staff";
 
-  const availableDepartments = useMemo(() => {
-    return DEPARTMENT_NAMES;
-  }, []);
+  const hasValidAssignedOffice =
+    assignedOffice && DEPARTMENT_NAMES.includes(assignedOffice);
+
+  const effectiveDeptName = hasValidAssignedOffice ? assignedOffice : selectedDeptName;
 
   const getStaffWindowDocId = (officeName, windowName) => {
     const safeOffice = String(officeName || "UnknownOffice")
@@ -222,7 +228,7 @@ function StaffDashboard() {
     }));
   };
 
-  const updateOfficePredictionStats = async (deptName = selectedDeptName) => {
+  const updateOfficePredictionStats = async (deptName = effectiveDeptName) => {
     try {
       if (!deptName) return;
 
@@ -261,7 +267,7 @@ function StaffDashboard() {
     try {
       if (!currentUser?.uid) return;
 
-      const officeValue = selectedDeptName || assignedOffice || "Registrar";
+      const officeValue = assignedOffice || effectiveDeptName;
       const windowValue = assignedWindow || "Window 1";
 
       if (!officeValue || !windowValue) return;
@@ -301,10 +307,10 @@ function StaffDashboard() {
   }, []);
 
   useEffect(() => {
-    if (assignedOffice && DEPARTMENT_NAMES.includes(assignedOffice)) {
+    if (hasValidAssignedOffice) {
       setSelectedDeptName(assignedOffice);
     }
-  }, [assignedOffice]);
+  }, [assignedOffice, hasValidAssignedOffice]);
 
   useEffect(() => {
     if (!currentUser?.uid) return;
@@ -317,7 +323,7 @@ function StaffDashboard() {
     currentUser?.account_status,
     assignedOffice,
     assignedWindow,
-    selectedDeptName,
+    effectiveDeptName,
     staffDisplayName
   ]);
 
@@ -392,8 +398,8 @@ function StaffDashboard() {
   }, []);
 
   const selectedDept = useMemo(() => {
-    return departmentData[selectedDeptName] || null;
-  }, [departmentData, selectedDeptName]);
+    return departmentData[effectiveDeptName] || null;
+  }, [departmentData, effectiveDeptName]);
 
   useEffect(() => {
     if (!selectedDept) {
@@ -438,14 +444,14 @@ function StaffDashboard() {
   }, [selectedDept, usersMap]);
 
   useEffect(() => {
-    if (!selectedDeptName || !selectedDept) return;
+    if (!effectiveDeptName || !selectedDept) return;
 
     const timeoutId = setTimeout(() => {
-      updateOfficePredictionStats(selectedDeptName);
+      updateOfficePredictionStats(effectiveDeptName);
     }, 800);
 
     return () => clearTimeout(timeoutId);
-  }, [selectedDeptName, selectedDept, tickets, staffWindows]);
+  }, [effectiveDeptName, selectedDept, tickets, staffWindows]);
 
   const sortedTickets = useMemo(() => {
     const copy = [...tickets];
@@ -527,8 +533,18 @@ function StaffDashboard() {
   );
 
   const currentServingTicket = useMemo(() => {
-    return servingTickets[0] || null;
-  }, [servingTickets]);
+    const ownWindowServing = servingTickets.find((ticket) => {
+      const ticketWindow =
+        ticket.window_assignment || ticket.assigned_window || assignedWindow;
+
+      return (
+        ticket.served_by === currentUser?.uid ||
+        String(ticketWindow || "").trim() === String(assignedWindow || "").trim()
+      );
+    });
+
+    return ownWindowServing || null;
+  }, [servingTickets, currentUser?.uid, assignedWindow]);
 
   const selectedDeptActiveCount = useMemo(() => {
     return sortedTickets.filter(
@@ -544,12 +560,12 @@ function StaffDashboard() {
   }, [sortedTickets]);
 
   const regularPredictionStats = useMemo(() => {
-    return getSafePredictionStats(selectedDeptName, "Regular", tickets);
-  }, [selectedDeptName, tickets, departmentData, staffWindows]);
+    return getSafePredictionStats(effectiveDeptName, "Regular", tickets);
+  }, [effectiveDeptName, tickets, departmentData, staffWindows]);
 
   const priorityPredictionStats = useMemo(() => {
-    return getSafePredictionStats(selectedDeptName, "Priority", tickets);
-  }, [selectedDeptName, tickets, departmentData, staffWindows]);
+    return getSafePredictionStats(effectiveDeptName, "Priority", tickets);
+  }, [effectiveDeptName, tickets, departmentData, staffWindows]);
 
   const normalizeDisplayValue = (value) => {
     if (!value) return "-";
@@ -717,6 +733,11 @@ function StaffDashboard() {
 
   const handleCallNext = async () => {
     try {
+      if (!hasValidAssignedOffice) {
+        alert("Your staff account has no valid assigned office. Please ask the admin to assign your office first.");
+        return;
+      }
+
       if (!selectedDept) {
         alert("Department data not loaded.");
         return;
@@ -776,14 +797,14 @@ function StaffDashboard() {
       });
 
       await updateDepartmentServingDisplay(nextTicket);
-      await updateOfficePredictionStats(selectedDeptName);
+      await updateOfficePredictionStats(effectiveDeptName);
 
       alert(`Now serving: ${nextTicket.ticket_number} at ${assignedWindow || "Window 1"}`);
     } catch (error) {
       console.error("CALL NEXT ERROR:", error);
 
       if (error.code === "permission-denied") {
-        alert("Failed to call next ticket because Firestore rules blocked the update.");
+        alert("Failed to call next ticket because Firestore rules blocked the update. Check if this staff account is assigned to this exact office.");
         return;
       }
 
@@ -795,6 +816,11 @@ function StaffDashboard() {
 
   const handleFinishCurrent = async () => {
     try {
+      if (!hasValidAssignedOffice) {
+        alert("Your staff account has no valid assigned office. Please ask the admin to assign your office first.");
+        return;
+      }
+
       if (!selectedDept) {
         alert("Department data not loaded.");
         return;
@@ -839,7 +865,7 @@ function StaffDashboard() {
         user_name: currentServingTicket.user_name || "",
         student_no: currentServingTicket.student_no || "",
         dept_id: selectedDept.id,
-        dept_name: selectedDept.dept_name || selectedDeptName,
+        dept_name: selectedDept.dept_name || effectiveDeptName,
         lane_type: currentServingTicket.lane_type || "Regular",
         priority_type: currentServingTicket.priority_type || "Regular",
         start_time: startDate || null,
@@ -851,14 +877,14 @@ function StaffDashboard() {
       });
 
       await clearDepartmentServingDisplay(currentServingTicket);
-      await updateOfficePredictionStats(selectedDeptName);
+      await updateOfficePredictionStats(effectiveDeptName);
 
       alert(`Completed: ${currentServingTicket.ticket_number}`);
     } catch (error) {
       console.error("FINISH CURRENT ERROR:", error);
 
       if (error.code === "permission-denied") {
-        alert("Failed to finish current ticket because Firestore rules blocked the update.");
+        alert("Failed to finish current ticket because Firestore rules blocked the update. Check if this staff account is assigned to this exact office.");
         return;
       }
 
@@ -870,6 +896,11 @@ function StaffDashboard() {
 
   const handlePauseCurrent = async () => {
     try {
+      if (!hasValidAssignedOffice) {
+        alert("Your staff account has no valid assigned office. Please ask the admin to assign your office first.");
+        return;
+      }
+
       if (!currentServingTicket) {
         alert("No serving ticket to pause.");
         return;
@@ -889,14 +920,14 @@ function StaffDashboard() {
       });
 
       await clearDepartmentServingDisplay(currentServingTicket);
-      await updateOfficePredictionStats(selectedDeptName);
+      await updateOfficePredictionStats(effectiveDeptName);
 
       alert(`Paused: ${currentServingTicket.ticket_number}`);
     } catch (error) {
       console.error("PAUSE CURRENT ERROR:", error);
 
       if (error.code === "permission-denied") {
-        alert("Failed to pause current ticket because Firestore rules blocked the update.");
+        alert("Failed to pause current ticket because Firestore rules blocked the update. Check if this staff account is assigned to this exact office.");
         return;
       }
 
@@ -908,6 +939,11 @@ function StaffDashboard() {
 
   const handleResumePaused = async (ticket) => {
     try {
+      if (!hasValidAssignedOffice) {
+        alert("Your staff account has no valid assigned office. Please ask the admin to assign your office first.");
+        return;
+      }
+
       if (!ticket) return;
 
       if (currentServingTicket) {
@@ -930,14 +966,14 @@ function StaffDashboard() {
       });
 
       await updateDepartmentServingDisplay(ticket);
-      await updateOfficePredictionStats(selectedDeptName);
+      await updateOfficePredictionStats(effectiveDeptName);
 
       alert(`Resumed: ${ticket.ticket_number} at ${assignedWindow || "Window 1"}`);
     } catch (error) {
       console.error("RESUME PAUSED ERROR:", error);
 
       if (error.code === "permission-denied") {
-        alert("Failed to resume paused ticket because Firestore rules blocked the update.");
+        alert("Failed to resume paused ticket because Firestore rules blocked the update. Check if this staff account is assigned to this exact office.");
         return;
       }
 
@@ -968,22 +1004,22 @@ function StaffDashboard() {
         <div className="qf-staff-hero-left">
           <div className="qf-staff-badge">STAFF CONTROL PANEL</div>
 
-          <h1>{selectedDeptName} Queue Operations</h1>
+          <h1>{effectiveDeptName} Queue Operations</h1>
           <p>
             Monitor live queue flow, serve the next ticket correctly, and guide users
-            to the assigned service window.
+            to your assigned service window.
           </p>
         </div>
 
         <div className="qf-staff-hero-right">
           <div className="qf-staff-mini-card">
             <span>Assigned Office</span>
-            <strong>{assignedOffice || selectedDeptName}</strong>
+            <strong>{assignedOffice || "Not Assigned"}</strong>
           </div>
 
           <div className="qf-staff-mini-card">
             <span>Assigned Window</span>
-            <strong>{assignedWindow || "-"}</strong>
+            <strong>{assignedWindow || "Window 1"}</strong>
           </div>
 
           <div className="qf-staff-mini-card">
@@ -1034,28 +1070,45 @@ function StaffDashboard() {
         <div className="qf-staff-panel-head">
           <div>
             <h2>Quick Controls</h2>
-            <p>Use the controls below to manage the current live queue flow.</p>
+            <p>
+              This staff account can only manage the assigned office and assigned
+              window shown below.
+            </p>
           </div>
         </div>
 
-        <div className="qf-staff-action-row">
-          <select
-            value={selectedDeptName}
-            onChange={(e) => setSelectedDeptName(e.target.value)}
-            className="qf-staff-select"
-          >
-            {availableDepartments.map((deptName) => (
-              <option key={deptName} value={deptName}>
-                {deptName}
-              </option>
-            ))}
-          </select>
+        <div className="qf-staff-locked-control">
+          <div>
+            <span>Locked Office</span>
+            <strong>{assignedOffice || "Not Assigned"}</strong>
+            <p>Staff cannot switch to another office from this panel.</p>
+          </div>
 
+          <div>
+            <span>Locked Window</span>
+            <strong>{assignedWindow || "Window 1"}</strong>
+            <p>All called tickets will be served through this window.</p>
+          </div>
+        </div>
+
+        {!hasValidAssignedOffice && (
+          <div className="qf-staff-warning-box">
+            This staff account has no valid assigned office. Please log in as admin
+            and assign this staff to Registrar, Cashier, Accounting, or EDP.
+          </div>
+        )}
+
+        <div className="qf-staff-action-row qf-staff-action-row-locked">
           <button
             type="button"
             className="qf-staff-primary-btn"
             onClick={handleCallNext}
-            disabled={processingNext || !selectedDept || !selectedDept.is_active}
+            disabled={
+              processingNext ||
+              !hasValidAssignedOffice ||
+              !selectedDept ||
+              !selectedDept.is_active
+            }
           >
             {processingNext ? "Processing..." : "Call Next"}
           </button>
@@ -1133,7 +1186,7 @@ function StaffDashboard() {
           <div className="qf-staff-panel-head">
             <div>
               <h2>Paused Tickets</h2>
-              <p>Resume paused tickets when the current serving slot is free.</p>
+              <p>Resume paused tickets when your current serving slot is free.</p>
             </div>
           </div>
 
@@ -1186,7 +1239,7 @@ function StaffDashboard() {
                       type="button"
                       className="qf-staff-primary-btn qf-staff-small-btn"
                       onClick={() => handleResumePaused(ticket)}
-                      disabled={processingResume}
+                      disabled={processingResume || !hasValidAssignedOffice}
                     >
                       {processingResume ? "Resuming..." : "Resume"}
                     </button>
@@ -1206,8 +1259,8 @@ function StaffDashboard() {
         <div>
           <h2>Queue Control</h2>
           <p>
-            Priority tickets appear before regular tickets. The assigned window is
-            already visible to users once they generate a queue number.
+            Priority tickets appear before regular tickets. This view is locked to
+            your assigned office only.
           </p>
         </div>
       </div>
@@ -1368,7 +1421,7 @@ function StaffDashboard() {
         <div>
           <h2>Completed Records</h2>
           <p>
-            Finished tickets and reset-cleared tickets handled inside the selected
+            Finished tickets and reset-cleared tickets handled inside your assigned
             department.
           </p>
         </div>
@@ -1470,7 +1523,7 @@ function StaffDashboard() {
 
           <div>
             <strong>{staffDisplayName}</strong>
-            <p>{assignedOffice || "Queue Operations"}</p>
+            <p>{assignedOffice || "No assigned office"}</p>
             <p>{assignedWindow || "Window 1"}</p>
           </div>
         </div>

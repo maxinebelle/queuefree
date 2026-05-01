@@ -404,6 +404,67 @@
   min-width: 0;
 }
 
+/* STAFF ASSIGNED OFFICE CONTROL FIX */
+.qf-staff-locked-control {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 12px;
+  margin-bottom: 14px;
+}
+
+.qf-staff-locked-control > div {
+  min-width: 0;
+  padding: 15px;
+  border-radius: 18px;
+  background:
+    radial-gradient(circle at top right, rgba(20, 184, 166, 0.13), transparent 38%),
+    rgba(15, 23, 42, 0.86);
+  border: 1px solid rgba(20, 184, 166, 0.18);
+}
+
+.qf-staff-locked-control span {
+  display: block;
+  color: #99f6e4;
+  font-size: 11px;
+  font-weight: 950;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+}
+
+.qf-staff-locked-control strong {
+  display: block;
+  margin-top: 8px;
+  color: #ffffff;
+  font-size: 21px;
+  font-weight: 950;
+  line-height: 1.2;
+  word-break: break-word;
+}
+
+.qf-staff-locked-control p {
+  margin: 8px 0 0 0;
+  color: #94a3b8;
+  font-size: 13px;
+  line-height: 1.55;
+}
+
+.qf-staff-warning-box {
+  margin-bottom: 14px;
+  padding: 14px 16px;
+  border-radius: 16px;
+  background: rgba(245, 158, 11, 0.12);
+  border: 1px solid rgba(245, 158, 11, 0.24);
+  color: #fde68a;
+  font-size: 13px;
+  line-height: 1.6;
+  font-weight: 850;
+}
+
+.qf-staff-action-row-locked {
+  grid-template-columns: repeat(3, minmax(0, auto));
+  justify-content: flex-end;
+}
+
 /* DRAWER */
 .qf-staff-drawer {
   position: fixed;
@@ -543,6 +604,17 @@
 
   .qf-staff-action-row {
     grid-template-columns: repeat(2, minmax(0, 1fr));
+  }
+}
+
+@media (max-width: 900px) {
+  .qf-staff-locked-control {
+    grid-template-columns: 1fr;
+  }
+
+  .qf-staff-action-row-locked {
+    grid-template-columns: 1fr;
+    justify-content: stretch;
   }
 }
 
