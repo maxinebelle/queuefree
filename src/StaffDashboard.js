@@ -993,159 +993,149 @@ function StaffDashboard() {
   };
 
   const drawerItems = [
-    { key: "overview", label: "Overview" },
-    { key: "queue", label: "Queue Control" },
+    { key: "overview", label: "Operations" },
+    { key: "queue", label: "Waiting Queue" },
     { key: "completed", label: "Completed" }
   ];
 
+  const renderActionButtons = () => (
+    <div className="qf-staff-action-row qf-staff-action-row-locked">
+      <button
+        type="button"
+        className="qf-staff-primary-btn"
+        onClick={handleCallNext}
+        disabled={
+          processingNext ||
+          !hasValidAssignedOffice ||
+          !selectedDept ||
+          !selectedDept.is_active ||
+          !!currentServingTicket
+        }
+      >
+        {processingNext ? "Processing..." : "Call Next"}
+      </button>
+
+      <button
+        type="button"
+        className="qf-staff-secondary-btn"
+        onClick={handlePauseCurrent}
+        disabled={processingPause || !currentServingTicket}
+      >
+        {processingPause ? "Pausing..." : "Pause"}
+      </button>
+
+      <button
+        type="button"
+        className="qf-staff-success-btn"
+        onClick={handleFinishCurrent}
+        disabled={processingFinish || !currentServingTicket}
+      >
+        {processingFinish ? "Finishing..." : "Finish Current"}
+      </button>
+    </div>
+  );
+
   const renderOverviewSection = () => (
     <>
-      <section className="qf-staff-hero">
+      <section className="qf-staff-hero qf-staff-hero-clean">
         <div className="qf-staff-hero-left">
-          <div className="qf-staff-badge">STAFF CONTROL PANEL</div>
+          <div className="qf-staff-badge">STAFF OPERATIONS</div>
 
-          <h1>{effectiveDeptName} Queue Operations</h1>
+          <h1>
+            {effectiveDeptName} • {assignedWindow || "Window 1"}
+          </h1>
           <p>
-            Monitor live queue flow, serve the next ticket correctly, and guide users
-            to your assigned service window.
+            Manage the live queue for your assigned office only. Use Call Next,
+            Pause, Finish, and Resume without switching to another department.
+          </p>
+
+          {!hasValidAssignedOffice && (
+            <div className="qf-staff-warning-box qf-staff-hero-warning">
+              This staff account has no valid assigned office. Please ask the admin
+              to assign this account to Registrar, Cashier, Accounting, or EDP.
+            </div>
+          )}
+        </div>
+
+        <div className="qf-staff-command-card">
+          <span className="qf-staff-command-label">Current Task</span>
+
+          {currentServingTicket ? (
+            <>
+              <strong>{currentServingTicket.ticket_number}</strong>
+              <p>
+                {currentServingTicket.user_name} •{" "}
+                {currentServingTicket.lane_type || "Regular"} Lane
+              </p>
+              <div className="qf-staff-command-meta">
+                <span>{getWindowLabel(currentServingTicket)}</span>
+                <span>{currentServingTicket.priority_type || "Regular"}</span>
+              </div>
+            </>
+          ) : (
+            <>
+              <strong>No active ticket</strong>
+              <p>Ready to call the next waiting ticket.</p>
+              <div className="qf-staff-command-meta">
+                <span>{pendingTickets.length} waiting</span>
+                <span>{pausedTickets.length} paused</span>
+              </div>
+            </>
+          )}
+
+          {renderActionButtons()}
+        </div>
+      </section>
+
+      <section className="qf-staff-metric-grid">
+        <div className="qf-staff-metric-card">
+          <span>Waiting</span>
+          <strong>{pendingTickets.length}</strong>
+          <p>
+            {pendingPriorityTickets.length} priority •{" "}
+            {pendingRegularTickets.length} regular
           </p>
         </div>
 
-        <div className="qf-staff-hero-right">
-          <div className="qf-staff-mini-card">
-            <span>Assigned Office</span>
-            <strong>{assignedOffice || "Not Assigned"}</strong>
-          </div>
+        <div className="qf-staff-metric-card">
+          <span>Now Serving</span>
+          <strong>{servingTickets.length}</strong>
+          <p>
+            {normalizeDisplayValue(selectedDept?.regular_now_serving_display)} regular •{" "}
+            {normalizeDisplayValue(selectedDept?.priority_now_serving_display)} priority
+          </p>
+        </div>
 
-          <div className="qf-staff-mini-card">
-            <span>Assigned Window</span>
-            <strong>{assignedWindow || "Window 1"}</strong>
-          </div>
+        <div className="qf-staff-metric-card">
+          <span>Paused</span>
+          <strong>{pausedTickets.length}</strong>
+          <p>Resume only when your window is free.</p>
+        </div>
 
-          <div className="qf-staff-mini-card">
-            <span>Pending</span>
-            <strong>{pendingTickets.length}</strong>
-          </div>
-
-          <div className="qf-staff-mini-card">
-            <span>Serving</span>
-            <strong>{servingTickets.length}</strong>
-          </div>
-
-          <div className="qf-staff-mini-card">
-            <span>Paused</span>
-            <strong>{pausedTickets.length}</strong>
-          </div>
-
-          <div className="qf-staff-mini-card">
-            <span>Done</span>
-            <strong>{doneTickets.length}</strong>
-          </div>
+        <div className="qf-staff-metric-card">
+          <span>Completed</span>
+          <strong>{doneTickets.length}</strong>
+          <p>Finished or reset-cleared records.</p>
         </div>
       </section>
 
-      <section className="qf-staff-summary-grid">
-        <div className="qf-staff-summary-card">
-          <span>Regular Now Serving</span>
-          <strong>{normalizeDisplayValue(selectedDept?.regular_now_serving_display)}</strong>
-        </div>
-
-        <div className="qf-staff-summary-card">
-          <span>Regular Window</span>
-          <strong>{selectedDept?.regular_now_serving_window || "-"}</strong>
-        </div>
-
-        <div className="qf-staff-summary-card priority">
-          <span>Priority Now Serving</span>
-          <strong>{normalizeDisplayValue(selectedDept?.priority_now_serving_display)}</strong>
-        </div>
-
-        <div className="qf-staff-summary-card priority">
-          <span>Priority Window</span>
-          <strong>{selectedDept?.priority_now_serving_window || "-"}</strong>
-        </div>
-      </section>
-
-      <section className="qf-staff-panel">
-        <div className="qf-staff-panel-head">
-          <div>
-            <h2>Quick Controls</h2>
-            <p>
-              This staff account can only manage the assigned office and assigned
-              window shown below.
-            </p>
-          </div>
-        </div>
-
-        <div className="qf-staff-locked-control">
-          <div>
-            <span>Locked Office</span>
-            <strong>{assignedOffice || "Not Assigned"}</strong>
-            <p>Staff cannot switch to another office from this panel.</p>
-          </div>
-
-          <div>
-            <span>Locked Window</span>
-            <strong>{assignedWindow || "Window 1"}</strong>
-            <p>All called tickets will be served through this window.</p>
-          </div>
-        </div>
-
-        {!hasValidAssignedOffice && (
-          <div className="qf-staff-warning-box">
-            This staff account has no valid assigned office. Please log in as admin
-            and assign this staff to Registrar, Cashier, Accounting, or EDP.
-          </div>
-        )}
-
-        <div className="qf-staff-action-row qf-staff-action-row-locked">
-          <button
-            type="button"
-            className="qf-staff-primary-btn"
-            onClick={handleCallNext}
-            disabled={
-              processingNext ||
-              !hasValidAssignedOffice ||
-              !selectedDept ||
-              !selectedDept.is_active
-            }
-          >
-            {processingNext ? "Processing..." : "Call Next"}
-          </button>
-
-          <button
-            type="button"
-            className="qf-staff-secondary-btn"
-            onClick={handlePauseCurrent}
-            disabled={processingPause || !currentServingTicket}
-          >
-            {processingPause ? "Pausing..." : "Pause"}
-          </button>
-
-          <button
-            type="button"
-            className="qf-staff-success-btn"
-            onClick={handleFinishCurrent}
-            disabled={processingFinish || !currentServingTicket}
-          >
-            {processingFinish ? "Finishing..." : "Finish Current"}
-          </button>
-        </div>
-      </section>
-
-      <section className="qf-staff-live-grid">
-        <div className="qf-staff-panel">
+      <section className="qf-staff-work-grid">
+        <div className="qf-staff-panel qf-staff-focus-panel">
           <div className="qf-staff-panel-head">
             <div>
               <h2>Now Serving</h2>
-              <p>The ticket currently being handled in your assigned window.</p>
+              <p>The current ticket being handled at your assigned window.</p>
             </div>
           </div>
 
           {!currentServingTicket ? (
             <div className="qf-staff-empty-box">No ticket currently being served.</div>
           ) : (
-            <div className="qf-staff-live-serving-card">
+            <div
+              className={`qf-staff-ticket-card ${
+                currentServingTicket.lane_type === "Priority" ? "priority" : ""
+              }`}
+            >
               <div className="qf-staff-ticket-top">
                 <div>
                   <h3>{currentServingTicket.ticket_number}</h3>
@@ -1169,7 +1159,7 @@ function StaffDashboard() {
                 </div>
 
                 <div className="qf-staff-meta-box">
-                  <span>Assigned Window</span>
+                  <span>Serving Window</span>
                   <strong>{getWindowLabel(currentServingTicket)}</strong>
                 </div>
 
@@ -1186,20 +1176,20 @@ function StaffDashboard() {
           <div className="qf-staff-panel-head">
             <div>
               <h2>Paused Tickets</h2>
-              <p>Resume paused tickets when your current serving slot is free.</p>
+              <p>Resume a paused ticket only when no ticket is currently serving.</p>
             </div>
           </div>
 
           {pausedTickets.length === 0 ? (
             <div className="qf-staff-empty-box">No paused tickets.</div>
           ) : (
-            <div className="qf-staff-ticket-list">
+            <div className="qf-staff-ticket-list qf-staff-compact-list">
               {pausedTickets.map((ticket) => (
                 <div key={ticket.id} className="qf-staff-ticket-card paused">
                   <div className="qf-staff-ticket-top">
                     <div>
                       <h3>{ticket.ticket_number}</h3>
-                      <p>{ticket.lane_type || "Regular"} Lane</p>
+                      <p>{ticket.user_name}</p>
                     </div>
 
                     <span className={getStatusClass(ticket.status)}>
@@ -1207,39 +1197,16 @@ function StaffDashboard() {
                     </span>
                   </div>
 
-                  <div className="qf-staff-ticket-meta">
-                    <div className="qf-staff-meta-box">
-                      <span>Name</span>
-                      <strong>{ticket.user_name}</strong>
-                    </div>
-
-                    <div className="qf-staff-meta-box">
-                      <span>Student No</span>
-                      <strong>{ticket.student_no}</strong>
-                    </div>
-
-                    <div className="qf-staff-meta-box">
-                      <span>Assigned Window</span>
-                      <strong>{getWindowLabel(ticket)}</strong>
-                    </div>
-
-                    <div className="qf-staff-meta-box">
-                      <span>Queue Position</span>
-                      <strong>{getQueuePositionLabel(ticket)}</strong>
-                    </div>
-
-                    <div className="qf-staff-meta-box">
-                      <span>AI Est. Wait</span>
-                      <strong>{getEstimatedWaitForTicket(ticket)}</strong>
-                    </div>
-                  </div>
-
                   <div className="qf-staff-inline-actions">
                     <button
                       type="button"
                       className="qf-staff-primary-btn qf-staff-small-btn"
                       onClick={() => handleResumePaused(ticket)}
-                      disabled={processingResume || !hasValidAssignedOffice}
+                      disabled={
+                        processingResume ||
+                        !hasValidAssignedOffice ||
+                        !!currentServingTicket
+                      }
                     >
                       {processingResume ? "Resuming..." : "Resume"}
                     </button>
@@ -1257,10 +1224,10 @@ function StaffDashboard() {
     <section className="qf-staff-panel">
       <div className="qf-staff-panel-head">
         <div>
-          <h2>Queue Control</h2>
+          <h2>Waiting Queue</h2>
           <p>
-            Priority tickets appear before regular tickets. This view is locked to
-            your assigned office only.
+            This queue list is locked to your assigned office. Priority tickets are
+            shown separately from regular tickets for easier control.
           </p>
         </div>
       </div>
@@ -1320,11 +1287,6 @@ function StaffDashboard() {
                     </div>
 
                     <div className="qf-staff-meta-box">
-                      <span>Lane Number</span>
-                      <strong>{ticket.lane_number || "-"}</strong>
-                    </div>
-
-                    <div className="qf-staff-meta-box">
                       <span>Queue Position</span>
                       <strong>{getQueuePositionLabel(ticket)}</strong>
                     </div>
@@ -1379,11 +1341,6 @@ function StaffDashboard() {
                     <div className="qf-staff-meta-box">
                       <span>Student No</span>
                       <strong>{ticket.student_no}</strong>
-                    </div>
-
-                    <div className="qf-staff-meta-box">
-                      <span>Lane Number</span>
-                      <strong>{ticket.lane_number || "-"}</strong>
                     </div>
 
                     <div className="qf-staff-meta-box">
@@ -1461,11 +1418,6 @@ function StaffDashboard() {
                 </div>
 
                 <div className="qf-staff-meta-box">
-                  <span>Priority Type</span>
-                  <strong>{ticket.priority_type || "Regular"}</strong>
-                </div>
-
-                <div className="qf-staff-meta-box">
                   <span>Completed At</span>
                   <strong>{getReadableDateTime(ticket.completed_at)}</strong>
                 </div>
@@ -1473,11 +1425,6 @@ function StaffDashboard() {
                 <div className="qf-staff-meta-box">
                   <span>Status</span>
                   <strong>{ticket.status || "-"}</strong>
-                </div>
-
-                <div className="qf-staff-meta-box">
-                  <span>Queue Position</span>
-                  <strong>{getQueuePositionLabel(ticket)}</strong>
                 </div>
 
                 <div className="qf-staff-meta-box">
