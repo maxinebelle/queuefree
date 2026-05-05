@@ -18,6 +18,7 @@ import {
   where,
   writeBatch
 } from "firebase/firestore";
+import jsPDF from "jspdf";
 import "./AdminDashboard.css";
 
 const DEPARTMENT_NAMES = ["Registrar", "Cashier", "Accounting", "EDP"];
@@ -44,6 +45,9 @@ function AdminDashboard() {
   const [reportStatusFilter, setReportStatusFilter] = useState("all");
   const [reportLaneFilter, setReportLaneFilter] = useState("all");
   const [reportPeriodFilter, setReportPeriodFilter] = useState("all");
+
+  const [exportingPdf, setExportingPdf] = useState(false);
+  const [exportMenuOpen, setExportMenuOpen] = useState(false);
 
   const [newStaff, setNewStaff] = useState({
     first_name: "",
@@ -690,7 +694,7 @@ function AdminDashboard() {
   }, [tickets, users, departments]);
 
   const reportUserActivityLogs = useMemo(() => {
-    return filteredReportTickets
+    return [...filteredReportTickets]
       .sort((a, b) => {
         const aTime = a.created_at?.seconds || 0;
         const bTime = b.created_at?.seconds || 0;
@@ -1096,114 +1100,762 @@ function AdminDashboard() {
     setReportPeriodFilter("all");
   };
 
-  const handleExportSummaryCsv = () => {
+
+  const getReportPeriodLabel = () => {
+    if (reportPeriodFilter === "today") return "Today";
+    if (reportPeriodFilter === "week") return "Last 7 Days";
+    if (reportPeriodFilter === "month") return "Last 30 Days";
+    return "All Time";
+  };
+
+  const getReportFileBaseName = () => {
+    const normalize = (value) =>
+      String(value || "all")
+        .toLowerCase()
+        .replace(/[^a-z0-9]+/g, "-")
+        .replace(/^-+|-+$/g, "");
+
+    const office = reportOfficeFilter === "all" ? "all-offices" : normalize(reportOfficeFilter);
+    const status = reportStatusFilter === "all" ? "all-status" : normalize(reportStatusFilter);
+    const lane = reportLaneFilter === "all" ? "all-lanes" : normalize(reportLaneFilter);
+    const period = normalize(getReportPeriodLabel());
+
+    return `queuefree-summary-report-${office}-${status}-${lane}-${period}`;
+  };
+
+  const getReportFiltersText = () => {
+    return `Office: ${
+      reportOfficeFilter === "all" ? "All Offices" : reportOfficeFilter
+    } | Status: ${
+      reportStatusFilter === "all" ? "All Statuses" : reportStatusFilter
+    } | Lane: ${
+      reportLaneFilter === "all" ? "All Lanes" : reportLaneFilter
+    } | Period: ${getReportPeriodLabel()}`;
+  };
+
+  const createTextBar = (value, total, size = 20) => {
+    const safeTotal = Math.max(Number(total || 0), 1);
+    const safeValue = Math.max(Number(value || 0), 0);
+    const percent = Math.min(100, Math.round((safeValue / safeTotal) * 100));
+    const filled = Math.min(size, Math.round((percent / 100) * size));
+    const empty = Math.max(0, size - filled);
+
+    return `[${"#".repeat(filled)}${"-".repeat(empty)}] ${percent}%`;
+  };
+
+  const getChartRowsForExport = (section, chartName, data, total, finding) => {
+    const maxValue = Math.max(...data.map((item) => Number(item.value || 0)), 1);
+
+    return data.map((item, index) => {
+      const value = Number(item.value || 0);
+      const percentOfTotal = getPercent(value, total);
+
+      return {
+        ReportPart: section,
+        VisualType: "BAR CHART",
+        ChartShownInSystem: chartName,
+        Rank: index + 1,
+        Label: item.label,
+        Value: value,
+        PercentOfTotal: `${percentOfTotal}%`,
+        BarShownInSystemWidth: `${Math.round(item.widthPercent || 0)}%`,
+        CsvVisualBar: createTextBar(value, maxValue),
+        ChartFinding: finding,
+        Notes: `This row represents the same ${item.label} bar shown in the Summary Reports chart.`
+      };
+    });
+  };
+
+  const getProfessionalCsvRows = () => {
     const rows = [];
+    const addRow = ({
+      section,
+      category,
+      item,
+      count,
+      total,
+      percentage,
+      interpretation,
+      sourcePanel
+    }) => {
+      const hasNumericPercent = typeof percentage === "number" && Number.isFinite(percentage);
+      const computedPercent = hasNumericPercent
+        ? percentage
+        : typeof count === "number" && typeof total === "number"
+        ? getPercent(count, total)
+        : "";
 
-    rows.push({
-      Section: "Filtered Summary",
-      Name: "Report Filters",
-      MetricA: "Office",
-      ValueA: reportOfficeFilter === "all" ? "All Offices" : reportOfficeFilter,
-      MetricB: "Status",
-      ValueB: reportStatusFilter === "all" ? "All Statuses" : reportStatusFilter,
-      MetricC: "Lane",
-      ValueC: reportLaneFilter === "all" ? "All Lanes" : reportLaneFilter,
-      Notes: `Period: ${reportPeriodFilter}`
-    });
-
-    rows.push({
-      Section: "Overall Summary",
-      Name: "System Totals",
-      MetricA: "Total Tickets",
-      ValueA: reportTotalTickets,
-      MetricB: "Active Queues",
-      ValueB: reportTotalRequests,
-      MetricC: "Transactions",
-      ValueC: filteredReportTransactions.length,
-      Notes: summaryInsight
-    });
-
-    rows.push({
-      Section: "Overall Summary",
-      Name: "Users and Staff",
-      MetricA: "Total Users",
-      ValueA: userAccounts.length,
-      MetricB: "Active Users",
-      ValueB: activeUserAccounts.length,
-      MetricC: "Active Staff",
-      ValueC: activeStaffAccounts.length,
-      Notes: `Archived users: ${archivedUserAccounts.length}; archived staff: ${archivedStaffAccounts.length}`
-    });
-
-    rows.push({
-      Section: "Queue Status",
-      Name: "Status Distribution",
-      MetricA: "Pending",
-      ValueA: reportTotalPending,
-      MetricB: "Serving",
-      ValueB: reportTotalServing,
-      MetricC: "Done",
-      ValueC: reportTotalDone,
-      Notes: `Paused: ${reportTotalPaused}; Reset: ${reportTotalReset}; Cancelled: ${reportTotalCancelled}`
-    });
-
-    rows.push({
-      Section: "Lane Report",
-      Name: "Regular vs Priority",
-      MetricA: "Regular Tickets",
-      ValueA: reportTotalRegular,
-      MetricB: "Priority Tickets",
-      ValueB: reportTotalPriority,
-      MetricC: "Approved Priority Users",
-      ValueC: approvedPriorityUsers.length,
-      Notes: `Pending priority requests: ${pendingPriorityUsers.length}; Rejected priority requests: ${rejectedPriorityUsers.length}`
-    });
-
-    rows.push({
-      Section: "Transaction History",
-      Name: "Service Records",
-      MetricA: "Transactions",
-      ValueA: filteredReportTransactions.length,
-      MetricB: "Average Service Seconds",
-      ValueB: reportAvgServiceSeconds,
-      MetricC: "Average Service Minutes",
-      ValueC: reportAvgServiceMinutes,
-      Notes: "Based on completed service records that match the report filters."
-    });
-
-    departments
-      .filter((dept) => reportOfficeFilter === "all" || dept.dept_name === reportOfficeFilter)
-      .forEach((dept) => {
-        const counts = getReportDepartmentCounts(dept.id);
-
-        rows.push({
-          Section: "Department Summary",
-          Name: dept.dept_name || "Office",
-          MetricA: "Total Tickets",
-          ValueA: counts.total,
-          MetricB: "Active Tickets",
-          ValueB: counts.active,
-          MetricC: "Completed Tickets",
-          ValueC: counts.done,
-          Notes: `Pending: ${counts.pending}; Serving: ${counts.serving}; Paused: ${counts.paused}; Regular: ${counts.regular}; Priority: ${counts.priority}; Regular now serving: ${normalizeNowServingDisplay(dept.regular_now_serving_display)}; Priority now serving: ${normalizeNowServingDisplay(dept.priority_now_serving_display)}`
-        });
-      });
-
-    reportUserActivityLogs.slice(0, 12).forEach((log) => {
       rows.push({
-        Section: "User Activity Logs",
-        Name: log.userName,
-        MetricA: "Action",
-        ValueA: log.action,
-        MetricB: "Ticket",
-        ValueB: log.ticketNumber,
-        MetricC: "Status",
-        ValueC: log.status,
-        Notes: `${log.department}; ${log.email}; ${log.createdAt}`
+        Section: section,
+        Category: category,
+        ReportItem: item,
+        Count: count,
+        Percentage: computedPercent === "" ? "" : `${computedPercent}%`,
+        ProgressBar:
+          computedPercent === "" ? "" : createTextBar(Number(computedPercent || 0), 100),
+        Interpretation: interpretation,
+        SourcePanel: sourcePanel
+      });
+    };
+
+    addRow({
+      section: "Report Information",
+      category: "Selected Filters",
+      item: "Current Report View",
+      count: reportTotalTickets,
+      percentage: 100,
+      interpretation: getReportFiltersText(),
+      sourcePanel: "Summary Reports"
+    });
+
+    addRow({
+      section: "Executive Summary",
+      category: "Report Snapshot",
+      item: reportHealthLabel,
+      count: reportTotalTickets,
+      percentage: reportTotalTickets ? 100 : 0,
+      interpretation: summaryInsight,
+      sourcePanel: "Report Snapshot"
+    });
+
+    addRow({
+      section: "KPI Summary",
+      category: "Queue Totals",
+      item: "Total Tickets",
+      count: reportTotalTickets,
+      percentage: reportTotalTickets ? 100 : 0,
+      interpretation: `${reportTotalRequests} active queue${reportTotalRequests === 1 ? "" : "s"} in the selected view.`,
+      sourcePanel: "KPI Cards"
+    });
+
+    addRow({
+      section: "KPI Summary",
+      category: "Completion",
+      item: "Completed Tickets",
+      count: reportTotalDone,
+      total: reportTotalTickets,
+      interpretation: `${reportCompletionRate}% of selected tickets are completed.`,
+      sourcePanel: "KPI Cards"
+    });
+
+    addRow({
+      section: "KPI Summary",
+      category: "Priority Lane",
+      item: "Priority Tickets",
+      count: reportTotalPriority,
+      total: reportTotalTickets,
+      interpretation: `${reportPriorityRate}% of selected tickets are priority lane tickets.`,
+      sourcePanel: "KPI Cards"
+    });
+
+    addRow({
+      section: "KPI Summary",
+      category: "Service Transactions",
+      item: "Completed Transactions",
+      count: filteredReportTransactions.length,
+      total: Math.max(reportTotalTickets, filteredReportTransactions.length),
+      interpretation: `${reportAvgServiceSeconds}s average service time for matching transaction records.`,
+      sourcePanel: "KPI Cards"
+    });
+
+    reportStatusDistributionData.forEach((item) => {
+      addRow({
+        section: "Queue Status Breakdown",
+        category: "Status Distribution",
+        item: item.label,
+        count: item.value,
+        total: reportTotalTickets,
+        interpretation: `${item.label} ticket count in the selected report.`,
+        sourcePanel: "Queue Status Chart"
       });
     });
 
-    downloadCsv("queuefree-filtered-summary-report.csv", rows);
+    reportDepartmentSummaryData.forEach((item) => {
+      addRow({
+        section: "Office Queue Volume",
+        category: "Office Demand",
+        item: item.label,
+        count: item.value,
+        total: reportTotalTickets,
+        interpretation: `${item.label} received ${item.value} selected ticket${item.value === 1 ? "" : "s"}.`,
+        sourcePanel: "Office Queue Volume Chart"
+      });
+    });
+
+    reportLaneDistributionData.forEach((item) => {
+      addRow({
+        section: "Lane Usage",
+        category: "Regular and Priority",
+        item: item.label,
+        count: item.value,
+        total: reportTotalTickets,
+        interpretation: `${item.label} lane total for the selected report.`,
+        sourcePanel: "Lane Usage Chart"
+      });
+    });
+
+    reportPeakHourData.forEach((item) => {
+      addRow({
+        section: "Peak Hour Pattern",
+        category: "Time Activity",
+        item: item.label,
+        count: item.value,
+        total: reportTotalTickets,
+        interpretation: `${item.label} queue activity for the selected report period.`,
+        sourcePanel: "Peak Hour Pattern Chart"
+      });
+    });
+
+    const totalPriorityRequests =
+      pendingPriorityUsers.length + approvedPriorityUsers.length + rejectedPriorityUsers.length;
+
+    [
+      ["Pending", pendingPriorityUsers.length, "Users waiting for priority verification."],
+      ["Approved", approvedPriorityUsers.length, "Users approved for priority lane access."],
+      ["Rejected", rejectedPriorityUsers.length, "Users rejected from priority lane access."]
+    ].forEach(([label, value, interpretation]) => {
+      addRow({
+        section: "Priority Requests",
+        category: "Verification Status",
+        item: label,
+        count: value,
+        total: totalPriorityRequests,
+        interpretation,
+        sourcePanel: "Priority Requests Summary"
+      });
+    });
+
+    filteredReportTransactions.slice(0, 25).forEach((item, index) => {
+      addRow({
+        section: "Transaction History",
+        category: "Recent Service Record",
+        item: `${index + 1}. ${item.ticket_number || item.ticket_id || "-"}`,
+        count: Number(item.duration_sec || 0),
+        percentage: "",
+        interpretation: `Office: ${item.dept_name || getDepartmentNameById(item.dept_id)} | Lane: ${item.lane_type || "Regular"} | Window: ${item.window_assignment || "-"} | Served by: ${item.served_by_name || item.served_by || "-"} | End Time: ${getReadableDateTime(item.end_time)}`,
+        sourcePanel: "Latest Transaction History"
+      });
+    });
+
+    reportUserActivityLogs.slice(0, 25).forEach((log, index) => {
+      addRow({
+        section: "User Activity Logs",
+        category: "Recent User Action",
+        item: `${index + 1}. ${log.ticketNumber}`,
+        count: log.status,
+        percentage: "",
+        interpretation: `User: ${log.userName} | Email: ${log.email} | Office: ${log.department} | Action: ${log.action} | Created: ${log.createdAt}`,
+        sourcePanel: "Latest User Activity"
+      });
+    });
+
+    return rows;
+  };
+
+  const drawPdfBarChart = ({
+    pdf,
+    x,
+    y,
+    width,
+    title,
+    subtitle,
+    data,
+    accent,
+    totalForPercent,
+    colors
+  }) => {
+    const rowHeight = 8;
+    const headerHeight = 15;
+    const footerHeight = 7;
+    const cardHeight = headerHeight + data.length * rowHeight + footerHeight;
+    const maxValue = Math.max(...data.map((item) => Number(item.value || 0)), 1);
+
+    pdf.setFillColor(...colors.white);
+    pdf.setDrawColor(...colors.border);
+    pdf.roundedRect(x, y, width, cardHeight, 3, 3, "FD");
+
+    pdf.setFillColor(...accent);
+    pdf.roundedRect(x, y, width, 10.5, 3, 3, "F");
+
+    pdf.setFont("helvetica", "bold");
+    pdf.setFontSize(9.3);
+    pdf.setTextColor(...colors.white);
+    pdf.text(title, x + 4, y + 6.8, { maxWidth: width - 8 });
+
+    pdf.setFont("helvetica", "normal");
+    pdf.setFontSize(6.8);
+    pdf.setTextColor(...colors.muted);
+    pdf.text(subtitle, x + 4, y + 14, { maxWidth: width - 8 });
+
+    const labelWidth = 28;
+    const valueWidth = 11;
+    const barX = x + 4 + labelWidth;
+    const barWidth = width - labelWidth - valueWidth - 12;
+
+    let rowY = y + headerHeight + 2;
+
+    data.forEach((item) => {
+      const value = Number(item.value || 0);
+      const filledWidth = value > 0 ? Math.max(2.5, (value / maxValue) * barWidth) : 0;
+
+      pdf.setFont("helvetica", "normal");
+      pdf.setFontSize(6.8);
+      pdf.setTextColor(...colors.darkText);
+      pdf.text(String(item.label).slice(0, 17), x + 4, rowY + 2, {
+        maxWidth: labelWidth - 2
+      });
+
+      pdf.setFillColor(...colors.track);
+      pdf.roundedRect(barX, rowY - 1.8, barWidth, 4.2, 1.5, 1.5, "F");
+
+      if (filledWidth > 0) {
+        pdf.setFillColor(...accent);
+        pdf.roundedRect(barX, rowY - 1.8, filledWidth, 4.2, 1.5, 1.5, "F");
+      }
+
+      pdf.setFont("helvetica", "bold");
+      pdf.setFontSize(6.9);
+      pdf.setTextColor(...colors.darkText);
+      pdf.text(String(value), barX + barWidth + 3, rowY + 2);
+
+      rowY += rowHeight;
+    });
+
+    pdf.setFont("helvetica", "normal");
+    pdf.setFontSize(6.6);
+    pdf.setTextColor(...colors.muted);
+    pdf.text(
+      `Based on ${totalForPercent || 0} selected ticket record(s).`,
+      x + 4,
+      y + cardHeight - 3
+    );
+
+    return cardHeight;
+  };
+
+  const handleExportReport = (format) => {
+    setExportMenuOpen(false);
+
+    if (format === "csv") {
+      handleExportSummaryCsv();
+      return;
+    }
+
+    if (format === "pdf") {
+      handleExportSummaryPdf();
+    }
+  };
+
+
+  const handleExportSummaryCsv = () => {
+    const rows = getProfessionalCsvRows();
+
+    downloadCsv(`${getReportFileBaseName()}.csv`, rows);
+  };
+
+  const handleExportSummaryPdf = async () => {
+    try {
+      setExportingPdf(true);
+
+      const pdf = new jsPDF("p", "mm", "a4");
+      const pageWidth = pdf.internal.pageSize.getWidth();
+      const pageHeight = pdf.internal.pageSize.getHeight();
+      const margin = 12;
+
+      const colors = {
+        page: [248, 250, 252],
+        white: [255, 255, 255],
+        darkText: [15, 23, 42],
+        text: [51, 65, 85],
+        muted: [100, 116, 139],
+        border: [203, 213, 225],
+        track: [226, 232, 240],
+        navy: [15, 23, 42],
+        blue: [46, 168, 255],
+        purple: [139, 92, 246],
+        teal: [20, 184, 166],
+        green: [34, 197, 94],
+        amber: [245, 158, 11],
+        red: [239, 68, 68]
+      };
+
+      let y = 12;
+
+      const paintPage = () => {
+        pdf.setFillColor(...colors.page);
+        pdf.rect(0, 0, pageWidth, pageHeight, "F");
+      };
+
+      const addPageIfNeeded = (neededHeight = 25) => {
+        if (y + neededHeight > pageHeight - 14) {
+          pdf.addPage();
+          paintPage();
+          y = 12;
+          drawPageHeader(false);
+        }
+      };
+
+      const drawPageHeader = (isCover = false) => {
+        pdf.setFillColor(...colors.white);
+        pdf.setDrawColor(...colors.border);
+        pdf.roundedRect(margin, y, pageWidth - margin * 2, isCover ? 36 : 28, 4, 4, "FD");
+
+        pdf.setFillColor(...colors.teal);
+        pdf.roundedRect(margin + 5, y + 6, 4, isCover ? 24 : 16, 1.8, 1.8, "F");
+        pdf.setFillColor(...colors.blue);
+        pdf.roundedRect(margin + 10, y + 6, 4, isCover ? 24 : 16, 1.8, 1.8, "F");
+        pdf.setFillColor(...colors.purple);
+        pdf.roundedRect(margin + 15, y + 6, 4, isCover ? 24 : 16, 1.8, 1.8, "F");
+
+        pdf.setFont("helvetica", "bold");
+        pdf.setFontSize(isCover ? 17 : 12);
+        pdf.setTextColor(...colors.darkText);
+        pdf.text("QueueFree Summary Report", margin + 24, y + (isCover ? 13 : 10));
+
+        pdf.setFont("helvetica", "normal");
+        pdf.setFontSize(isCover ? 8.3 : 7.3);
+        pdf.setTextColor(...colors.muted);
+        pdf.text("Queue analytics, report charts, transactions, and user activity.", margin + 24, y + (isCover ? 20 : 16));
+        pdf.text(`Generated: ${new Date().toLocaleString()} | Prepared by: ${displayName}`, margin + 24, y + (isCover ? 27 : 22));
+
+        y += isCover ? 44 : 35;
+      };
+
+      const drawSectionTitle = (title, helper = "") => {
+        addPageIfNeeded(helper ? 16 : 10);
+
+        pdf.setFont("helvetica", "bold");
+        pdf.setFontSize(12.2);
+        pdf.setTextColor(...colors.darkText);
+        pdf.text(title, margin, y);
+        y += 5.5;
+
+        if (helper) {
+          pdf.setFont("helvetica", "normal");
+          pdf.setFontSize(7.8);
+          pdf.setTextColor(...colors.muted);
+          pdf.text(helper, margin, y, { maxWidth: pageWidth - margin * 2 });
+          y += 6.5;
+        }
+      };
+
+      const drawFilterStrip = () => {
+        addPageIfNeeded(20);
+
+        pdf.setFillColor(...colors.white);
+        pdf.setDrawColor(...colors.border);
+        pdf.roundedRect(margin, y, pageWidth - margin * 2, 16, 3, 3, "FD");
+
+        pdf.setFont("helvetica", "bold");
+        pdf.setFontSize(7.5);
+        pdf.setTextColor(...colors.blue);
+        pdf.text("FILTERS USED", margin + 4, y + 6);
+
+        pdf.setFont("helvetica", "normal");
+        pdf.setFontSize(7.5);
+        pdf.setTextColor(...colors.darkText);
+        pdf.text(getReportFiltersText(), margin + 4, y + 11.5, {
+          maxWidth: pageWidth - margin * 2 - 8
+        });
+
+        y += 22;
+      };
+
+      const drawKpiCard = (x, cardY, width, label, value, helper, accentColor) => {
+        pdf.setFillColor(...colors.white);
+        pdf.setDrawColor(...colors.border);
+        pdf.roundedRect(x, cardY, width, 26, 3, 3, "FD");
+
+        pdf.setFillColor(...accentColor);
+        pdf.roundedRect(x + 3, cardY + 3, 2.5, 20, 1.2, 1.2, "F");
+
+        pdf.setFont("helvetica", "normal");
+        pdf.setFontSize(6.8);
+        pdf.setTextColor(...colors.muted);
+        pdf.text(String(label).toUpperCase(), x + 8, cardY + 7.2, { maxWidth: width - 11 });
+
+        pdf.setFont("helvetica", "bold");
+        pdf.setFontSize(15.5);
+        pdf.setTextColor(...colors.darkText);
+        pdf.text(String(value), x + 8, cardY + 16.2);
+
+        pdf.setFont("helvetica", "normal");
+        pdf.setFontSize(6.7);
+        pdf.setTextColor(...colors.text);
+        pdf.text(String(helper), x + 8, cardY + 22.4, { maxWidth: width - 11 });
+      };
+
+      const drawSummaryPanel = () => {
+        addPageIfNeeded(32);
+
+        pdf.setFillColor(...colors.white);
+        pdf.setDrawColor(...colors.border);
+        pdf.roundedRect(margin, y, pageWidth - margin * 2, 28, 3, 3, "FD");
+
+        pdf.setFillColor(...colors.teal);
+        pdf.roundedRect(margin, y, 3, 28, 1.2, 1.2, "F");
+
+        pdf.setFont("helvetica", "bold");
+        pdf.setFontSize(10.5);
+        pdf.setTextColor(...colors.darkText);
+        pdf.text(`Report Snapshot: ${reportHealthLabel}`, margin + 6, y + 7.5);
+
+        pdf.setFont("helvetica", "normal");
+        pdf.setFontSize(7.8);
+        pdf.setTextColor(...colors.text);
+        pdf.text(summaryInsight, margin + 6, y + 14.2, {
+          maxWidth: pageWidth - margin * 2 - 12
+        });
+
+        y += 35;
+      };
+
+      const drawTable = (title, headers, rows, widths) => {
+        addPageIfNeeded(24);
+        drawSectionTitle(title);
+
+        if (!rows || rows.length === 0) {
+          rows = [["No records available"]];
+          headers = ["Message"];
+          widths = [pageWidth - margin * 2 - 4];
+        }
+
+        pdf.setFillColor(...colors.navy);
+        pdf.roundedRect(margin, y, pageWidth - margin * 2, 8, 2, 2, "F");
+
+        let x = margin + 2;
+        pdf.setFont("helvetica", "bold");
+        pdf.setFontSize(7);
+        pdf.setTextColor(...colors.white);
+
+        headers.forEach((header, index) => {
+          pdf.text(String(header), x, y + 5.3, { maxWidth: widths[index] - 2 });
+          x += widths[index];
+        });
+
+        y += 8;
+
+        rows.forEach((row, rowIndex) => {
+          addPageIfNeeded(9);
+
+          pdf.setFillColor(...(rowIndex % 2 === 0 ? colors.white : [241, 245, 249]));
+          pdf.rect(margin, y, pageWidth - margin * 2, 8, "F");
+
+          x = margin + 2;
+          pdf.setFont("helvetica", "normal");
+          pdf.setFontSize(6.7);
+          pdf.setTextColor(...colors.darkText);
+
+          row.forEach((cell, index) => {
+            pdf.text(String(cell || "-").slice(0, 55), x, y + 5, {
+              maxWidth: widths[index] - 2
+            });
+            x += widths[index];
+          });
+
+          y += 8;
+        });
+
+        y += 5;
+      };
+
+      paintPage();
+      drawPageHeader(true);
+      drawFilterStrip();
+
+      drawSectionTitle(
+        "Executive Summary",
+        "This export uses the current filters selected in the Summary Reports panel."
+      );
+
+      const gap = 3;
+      const cardWidth = (pageWidth - margin * 2 - gap * 3) / 4;
+
+      drawKpiCard(
+        margin,
+        y,
+        cardWidth,
+        "Total Tickets",
+        reportTotalTickets,
+        `${reportTotalRequests} active queue${reportTotalRequests === 1 ? "" : "s"}`,
+        colors.blue
+      );
+
+      drawKpiCard(
+        margin + (cardWidth + gap),
+        y,
+        cardWidth,
+        "Completed",
+        reportTotalDone,
+        `${reportCompletionRate}% completion rate`,
+        colors.green
+      );
+
+      drawKpiCard(
+        margin + (cardWidth + gap) * 2,
+        y,
+        cardWidth,
+        "Priority",
+        reportTotalPriority,
+        `${reportPriorityRate}% priority usage`,
+        colors.amber
+      );
+
+      drawKpiCard(
+        margin + (cardWidth + gap) * 3,
+        y,
+        cardWidth,
+        "Transactions",
+        filteredReportTransactions.length,
+        `${reportAvgServiceSeconds}s avg service`,
+        colors.purple
+      );
+
+      y += 33;
+      drawSummaryPanel();
+
+      drawSectionTitle("Visual Analytics", "Main chart data from the Summary Reports panel.");
+      const chartGap = 6;
+      const chartWidth = (pageWidth - margin * 2 - chartGap) / 2;
+
+      const chartOneHeight = drawPdfBarChart({
+        pdf,
+        x: margin,
+        y,
+        width: chartWidth,
+        title: "Queue Status",
+        subtitle: `${reportTotalTickets} selected ticket record(s)`,
+        data: reportStatusDistributionData,
+        accent: colors.blue,
+        totalForPercent: reportTotalTickets,
+        colors
+      });
+
+      const chartTwoHeight = drawPdfBarChart({
+        pdf,
+        x: margin + chartWidth + chartGap,
+        y,
+        width: chartWidth,
+        title: "Office Queue Volume",
+        subtitle: `${reportDepartmentSummaryData.length} office${reportDepartmentSummaryData.length === 1 ? "" : "s"}`,
+        data: reportDepartmentSummaryData,
+        accent: colors.purple,
+        totalForPercent: reportTotalTickets,
+        colors
+      });
+
+      y += Math.max(chartOneHeight, chartTwoHeight) + 7;
+
+      addPageIfNeeded(70);
+
+      const chartThreeHeight = drawPdfBarChart({
+        pdf,
+        x: margin,
+        y,
+        width: chartWidth,
+        title: "Lane Usage",
+        subtitle: "Regular versus priority lane",
+        data: reportLaneDistributionData,
+        accent: colors.amber,
+        totalForPercent: reportTotalTickets,
+        colors
+      });
+
+      const chartFourHeight = drawPdfBarChart({
+        pdf,
+        x: margin + chartWidth + chartGap,
+        y,
+        width: chartWidth,
+        title: "Peak Hour Pattern",
+        subtitle: "Activity by office hour",
+        data: reportPeakHourData,
+        accent: colors.teal,
+        totalForPercent: reportTotalTickets,
+        colors
+      });
+
+      y += Math.max(chartThreeHeight, chartFourHeight) + 9;
+
+      drawTable(
+        "Office Breakdown",
+        ["Office", "Total", "Active", "Pending", "Serving", "Done", "Priority"],
+        departments
+          .filter((dept) => reportOfficeFilter === "all" || dept.dept_name === reportOfficeFilter)
+          .map((dept) => {
+            const counts = getReportDepartmentCounts(dept.id);
+
+            return [
+              dept.dept_name || "Office",
+              counts.total,
+              counts.active,
+              counts.pending,
+              counts.serving,
+              counts.done,
+              counts.priority
+            ];
+          }),
+        [42, 19, 20, 22, 22, 19, 22]
+      );
+
+      drawTable(
+        "Priority Request Summary",
+        ["Category", "Count", "Meaning"],
+        [
+          ["Pending", pendingPriorityUsers.length, "Waiting for admin verification"],
+          ["Approved", approvedPriorityUsers.length, "Allowed to use priority lane"],
+          ["Rejected", rejectedPriorityUsers.length, "Not allowed for priority lane"]
+        ],
+        [42, 24, 112]
+      );
+
+      drawTable(
+        "Latest Transaction History",
+        ["Ticket", "Office", "Lane", "Window", "Duration", "End Time"],
+        filteredReportTransactions.slice(0, 15).map((item) => [
+          item.ticket_number || item.ticket_id || "-",
+          item.dept_name || getDepartmentNameById(item.dept_id),
+          item.lane_type || "Regular",
+          item.window_assignment || "-",
+          `${item.duration_sec || 0}s`,
+          getReadableDateTime(item.end_time)
+        ]),
+        [30, 32, 23, 28, 24, 50]
+      );
+
+      drawTable(
+        "Latest User Activity Logs",
+        ["User", "Ticket", "Office", "Status", "Created"],
+        reportUserActivityLogs.slice(0, 16).map((log) => [
+          log.userName,
+          log.ticketNumber,
+          log.department,
+          log.status,
+          log.createdAt
+        ]),
+        [46, 28, 32, 27, 54]
+      );
+
+      const pageCount = pdf.internal.getNumberOfPages();
+
+      for (let pageNumber = 1; pageNumber <= pageCount; pageNumber += 1) {
+        pdf.setPage(pageNumber);
+        pdf.setFont("helvetica", "normal");
+        pdf.setFontSize(7);
+        pdf.setTextColor(...colors.muted);
+        pdf.text(
+          `QueueFree Summary Report | Page ${pageNumber} of ${pageCount}`,
+          margin,
+          pageHeight - 7
+        );
+      }
+
+      pdf.save(`${getReportFileBaseName()}.pdf`);
+    } catch (error) {
+      console.error("EXPORT SUMMARY PDF ERROR:", error);
+      alert("Failed to export PDF report. Please try again.");
+    } finally {
+      setExportingPdf(false);
+    }
   };
 
   const handleExportTransactionsCsv = () => {
@@ -2110,13 +2762,35 @@ function AdminDashboard() {
             </p>
           </div>
 
-          <button
-            type="button"
-            className="qf-admin-report-btn qf-admin-export-premium-btn"
-            onClick={handleExportSummaryCsv}
-          >
-            Export CSV
-          </button>
+          <div className="qf-admin-export-dropdown">
+            <button
+              type="button"
+              className="qf-admin-export-main-btn"
+              onClick={() => setExportMenuOpen((prev) => !prev)}
+              disabled={exportingPdf}
+              aria-haspopup="true"
+              aria-expanded={exportMenuOpen}
+            >
+              <span>{exportingPdf ? "Preparing Report..." : "Export Report"}</span>
+              <span className={`qf-admin-export-arrow ${exportMenuOpen ? "open" : ""}`}>
+                ▾
+              </span>
+            </button>
+
+            {exportMenuOpen && (
+              <div className="qf-admin-export-menu">
+                <button type="button" onClick={() => handleExportReport("pdf")}>
+                  <strong>Export as PDF</strong>
+                  <span>Printable report with summary, charts, transactions, and activity logs.</span>
+                </button>
+
+                <button type="button" onClick={() => handleExportReport("csv")}>
+                  <strong>Export as CSV</strong>
+                  <span>Spreadsheet-ready report with percentages and progress bars.</span>
+                </button>
+              </div>
+            )}
+          </div>
         </div>
 
         <div className="qf-admin-report-filter-panel">
@@ -2351,6 +3025,12 @@ function AdminDashboard() {
               </div>
             )}
           </div>
+        </div>
+
+        <div className="qf-admin-export-helper-note">
+          <strong>Report coverage:</strong> This summary includes the selected queue records,
+          status totals, office volume, lane usage, peak-hour activity, transactions, priority
+          requests, and recent user activity in one export.
         </div>
       </div>
     </div>
