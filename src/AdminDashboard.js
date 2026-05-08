@@ -19,7 +19,320 @@ import {
   writeBatch
 } from "firebase/firestore";
 import jsPDF from "jspdf";
+import * as XLSX from "xlsx-js-style";
 import "./AdminDashboard.css";
+
+const QF_XLSX_COLORS = {
+  title: "FF111827",
+  navy: "FFE5E7EB",
+  navy2: "FFF2F4F7",
+  subtitle: "FF667085",
+  header: "FFF2F4F7",
+  header2: "FFE5E7EB",
+  panel: "FFFFFFFF",
+  panel2: "FFF9FAFB",
+  border: "FFD0D5DD",
+  text: "FF101828",
+  muted: "FF667085",
+  white: "FFFFFFFF",
+  blue: "FF344054",
+  bluePale: "FFF8FAFC",
+  purple: "FF475467",
+  purplePale: "FFF8FAFC",
+  amber: "FF7A5C1F",
+  amberPale: "FFFFFCF5",
+  teal: "FF276749",
+  tealPale: "FFF6FEF9",
+  green: "FF276749",
+  red: "FFB42318",
+  slate: "FF344054",
+  progress: "FF475467",
+  progressTrack: "FFE5E7EB"
+};
+
+function qfXlsxStyle({
+  bold = false,
+  size = 10,
+  color = QF_XLSX_COLORS.text,
+  bg = null,
+  align = "left",
+  valign = "center",
+  wrap = true,
+  border = true
+} = {}) {
+  const style = {
+    font: { name: "Arial", sz: size, bold, color: { rgb: color } },
+    alignment: { horizontal: align, vertical: valign, wrapText: wrap }
+  };
+
+  if (bg) {
+    style.fill = { patternType: "solid", fgColor: { rgb: bg } };
+  }
+
+  if (border) {
+    const line = { style: "thin", color: { rgb: QF_XLSX_COLORS.border } };
+    style.border = { top: line, right: line, bottom: line, left: line };
+  }
+
+  return style;
+}
+
+function qfCell(ws, col, row, value, style, numFmt) {
+  const address = XLSX.utils.encode_cell({ c: col, r: row });
+  const isNumber = typeof value === "number" && Number.isFinite(value);
+
+  ws[address] = {
+    v: value === null || value === undefined ? "" : value,
+    t: isNumber ? "n" : "s"
+  };
+
+  if (style) ws[address].s = style;
+  if (numFmt) ws[address].z = numFmt;
+}
+
+function qfMerge(ws, startCol, startRow, endCol, endRow) {
+  if (!ws["!merges"]) ws["!merges"] = [];
+  ws["!merges"].push({
+    s: { c: startCol, r: startRow },
+    e: { c: endCol, r: endRow }
+  });
+}
+
+function qfWriteMerged(ws, row, startCol, endCol, value, style) {
+  for (let col = startCol; col <= endCol; col += 1) {
+    qfCell(ws, col, row, col === startCol ? value : "", style);
+  }
+  qfMerge(ws, startCol, row, endCol, row);
+}
+
+function qfSafePercent(value, total) {
+  const safeTotal = Math.max(Number(total || 0), 1);
+  return Math.round((Number(value || 0) / safeTotal) * 100);
+}
+
+function qfVisualBar(value, total, length = 26) {
+  const percent = qfSafePercent(value, total);
+  const filled = Math.min(length, Math.round((percent / 100) * length));
+  const empty = Math.max(0, length - filled);
+  return `${"■".repeat(filled)}${"□".repeat(empty)}  ${percent}%`;
+}
+
+function qfChartFinding(title, data, total = 0) {
+  const safeData = Array.isArray(data) ? data : [];
+  if (safeData.length === 0 || safeData.every((item) => Number(item.value || 0) === 0)) {
+    return `${title}: No matching records are available for the selected filters.`;
+  }
+
+  const sorted = [...safeData].sort((a, b) => Number(b.value || 0) - Number(a.value || 0));
+  const top = sorted[0];
+  const percent = total ? qfSafePercent(top.value, total) : 100;
+
+  return `${title}: ${top.label} has the highest value with ${top.value} record${Number(top.value || 0) === 1 ? "" : "s"}${total ? `, representing ${percent}% of the selected report data` : ""}.`;
+}
+
+function qfWriteWorkbookTitle(ws, title, subtitle, filters, preparedBy) {
+  const titleStyle = qfXlsxStyle({
+    bold: true,
+    size: 18,
+    color: QF_XLSX_COLORS.title,
+    bg: QF_XLSX_COLORS.panel,
+    border: false
+  });
+  const subStyle = qfXlsxStyle({
+    size: 10,
+    color: QF_XLSX_COLORS.subtitle,
+    bg: QF_XLSX_COLORS.panel,
+    border: false
+  });
+  const filterStyle = qfXlsxStyle({
+    size: 10,
+    color: QF_XLSX_COLORS.text,
+    bg: QF_XLSX_COLORS.header,
+    border: true
+  });
+
+  qfWriteMerged(ws, 0, 0, 9, title, titleStyle);
+  qfWriteMerged(ws, 1, 0, 9, subtitle, subStyle);
+  qfWriteMerged(ws, 2, 0, 9, `Generated: ${new Date().toLocaleString()} | Prepared by: ${preparedBy}`, subStyle);
+  qfWriteMerged(ws, 3, 0, 9, filters, filterStyle);
+
+  ws["!rows"] = ws["!rows"] || [];
+  ws["!rows"][0] = { hpt: 28 };
+  ws["!rows"][1] = { hpt: 20 };
+  ws["!rows"][2] = { hpt: 20 };
+  ws["!rows"][3] = { hpt: 24 };
+
+  return 5;
+}
+
+function qfWriteSection(ws, row, title, span = 10) {
+  const style = qfXlsxStyle({
+    bold: true,
+    size: 12,
+    color: QF_XLSX_COLORS.title,
+    bg: QF_XLSX_COLORS.header2,
+    border: true
+  });
+  qfWriteMerged(ws, row, 0, span - 1, title, style);
+  return row + 2;
+}
+
+function qfWriteKpi(ws, col, row, label, value, note) {
+  const top = qfXlsxStyle({
+    bold: true,
+    size: 9,
+    color: QF_XLSX_COLORS.muted,
+    bg: QF_XLSX_COLORS.panel,
+    border: true
+  });
+  const main = qfXlsxStyle({
+    bold: true,
+    size: 18,
+    color: QF_XLSX_COLORS.title,
+    bg: QF_XLSX_COLORS.panel,
+    border: true
+  });
+  const sub = qfXlsxStyle({
+    size: 9,
+    color: QF_XLSX_COLORS.slate,
+    bg: QF_XLSX_COLORS.panel,
+    border: true
+  });
+
+  qfCell(ws, col, row, label.toUpperCase(), top);
+  qfCell(ws, col + 1, row, "", top);
+  qfMerge(ws, col, row, col + 1, row);
+
+  qfCell(ws, col, row + 1, value, main);
+  qfCell(ws, col + 1, row + 1, "", main);
+  qfMerge(ws, col, row + 1, col + 1, row + 1);
+
+  qfCell(ws, col, row + 2, note, sub);
+  qfCell(ws, col + 1, row + 2, "", sub);
+  qfMerge(ws, col, row + 2, col + 1, row + 2);
+}
+
+function qfWriteChartTable(ws, startRow, title, data, accent, totalForPercent, finding) {
+  let row = startRow;
+  const titleStyle = qfXlsxStyle({
+    bold: true,
+    size: 11,
+    color: QF_XLSX_COLORS.title,
+    bg: QF_XLSX_COLORS.header,
+    border: true
+  });
+  const headStyle = qfXlsxStyle({
+    bold: true,
+    size: 9,
+    color: QF_XLSX_COLORS.title,
+    bg: QF_XLSX_COLORS.header2,
+    align: "center",
+    border: true
+  });
+  const rowStyle = qfXlsxStyle({
+    size: 9,
+    color: QF_XLSX_COLORS.text,
+    bg: QF_XLSX_COLORS.panel,
+    border: true
+  });
+  const altRowStyle = qfXlsxStyle({
+    size: 9,
+    color: QF_XLSX_COLORS.text,
+    bg: QF_XLSX_COLORS.panel2,
+    border: true
+  });
+  const barStyle = qfXlsxStyle({
+    bold: true,
+    size: 10,
+    color: QF_XLSX_COLORS.progress,
+    bg: QF_XLSX_COLORS.panel,
+    border: true
+  });
+  const findStyle = qfXlsxStyle({
+    size: 9,
+    color: QF_XLSX_COLORS.text,
+    bg: QF_XLSX_COLORS.panel2,
+    border: true
+  });
+
+  qfWriteMerged(ws, row, 0, 5, title, titleStyle);
+  row += 1;
+
+  ["Label", "Count", "Share", "Progress", "Finding", "Source"].forEach((header, index) => {
+    qfCell(ws, index, row, header, headStyle);
+  });
+  row += 1;
+
+  const safeData = data && data.length ? data : [{ label: "No Data", value: 0 }];
+
+  safeData.forEach((item, index) => {
+    const value = Number(item.value || 0);
+    const baseStyle = index % 2 === 0 ? rowStyle : altRowStyle;
+    qfCell(ws, 0, row, item.label, baseStyle);
+    qfCell(ws, 1, row, value, baseStyle);
+    qfCell(ws, 2, row, `${qfSafePercent(value, totalForPercent)}%`, baseStyle);
+    qfCell(ws, 3, row, qfVisualBar(value, totalForPercent), barStyle);
+    qfCell(ws, 4, row, value > 0 ? `${item.label} contributes ${qfSafePercent(value, totalForPercent)}% in this view.` : "No matching record.", baseStyle);
+    qfCell(ws, 5, row, title, baseStyle);
+    row += 1;
+  });
+
+  qfWriteMerged(ws, row, 0, 5, finding, findStyle);
+  row += 2;
+
+  return row;
+}
+
+function qfWriteDataTable(ws, startRow, title, headers, rows, spanCols = null) {
+  let row = startRow;
+  const tableWidth = spanCols || headers.length;
+  const titleStyle = qfXlsxStyle({
+    bold: true,
+    size: 11,
+    color: QF_XLSX_COLORS.title,
+    bg: QF_XLSX_COLORS.panel,
+    border: false
+  });
+  const headStyle = qfXlsxStyle({
+    bold: true,
+    size: 9,
+    color: QF_XLSX_COLORS.title,
+    bg: QF_XLSX_COLORS.header2,
+    align: "center",
+    border: true
+  });
+  const bodyStyleA = qfXlsxStyle({
+    size: 9,
+    color: QF_XLSX_COLORS.text,
+    bg: QF_XLSX_COLORS.panel,
+    border: true
+  });
+  const bodyStyleB = qfXlsxStyle({
+    size: 9,
+    color: QF_XLSX_COLORS.text,
+    bg: QF_XLSX_COLORS.panel2,
+    border: true
+  });
+
+  qfWriteMerged(ws, row, 0, tableWidth - 1, title, titleStyle);
+  row += 1;
+
+  headers.forEach((header, index) => qfCell(ws, index, row, header, headStyle));
+  row += 1;
+
+  if (!rows || rows.length === 0) {
+    qfWriteMerged(ws, row, 0, tableWidth - 1, "No records available for the selected filters.", bodyStyleA);
+    row += 1;
+  } else {
+    rows.forEach((dataRow, rowIndex) => {
+      const style = rowIndex % 2 === 0 ? bodyStyleA : bodyStyleB;
+      dataRow.forEach((cell, colIndex) => qfCell(ws, colIndex, row, cell, style));
+      row += 1;
+    });
+  }
+
+  return row + 2;
+}
 
 const DEPARTMENT_NAMES = ["Registrar", "Cashier", "Accounting", "EDP"];
 const WINDOW_OPTIONS = ["Window 1", "Window 2", "Window 3", "Window 4"];
@@ -1448,9 +1761,206 @@ function AdminDashboard() {
 
 
   const handleExportSummaryCsv = () => {
-    const rows = getProfessionalCsvRows();
+    try {
+      const workbook = XLSX.utils.book_new();
 
-    downloadCsv(`${getReportFileBaseName()}.csv`, rows);
+      const summarySheet = {};
+      summarySheet["!merges"] = [];
+
+      let row = qfWriteWorkbookTitle(
+        summarySheet,
+        "QueueFree Summary Report",
+        "Campus queue analytics, visual chart data, transaction history, and user activity logs.",
+        getReportFiltersText(),
+        displayName
+      );
+
+      row = qfWriteSection(summarySheet, row, "Report Snapshot", 10, QF_XLSX_COLORS.teal);
+      qfWriteMerged(
+        summarySheet,
+        row,
+        0,
+        9,
+        `Status: ${reportHealthLabel} — ${summaryInsight}`,
+        qfXlsxStyle({ size: 10, color: QF_XLSX_COLORS.text, bg: QF_XLSX_COLORS.panel, border: true })
+      );
+      row += 2;
+
+      row = qfWriteSection(summarySheet, row, "Key Metrics", 10, QF_XLSX_COLORS.blue);
+      qfWriteKpi(summarySheet, 0, row, "Total Tickets", reportTotalTickets, `${reportTotalRequests} active queue${reportTotalRequests === 1 ? "" : "s"}`, QF_XLSX_COLORS.blue);
+      qfWriteKpi(summarySheet, 2, row, "Completed", reportTotalDone, `${reportCompletionRate}% completion rate`, QF_XLSX_COLORS.green);
+      qfWriteKpi(summarySheet, 4, row, "Priority Tickets", reportTotalPriority, `${reportPriorityRate}% priority usage`, QF_XLSX_COLORS.amber);
+      qfWriteKpi(summarySheet, 6, row, "Transactions", filteredReportTransactions.length, `${reportAvgServiceSeconds}s avg service`, QF_XLSX_COLORS.purple);
+      row += 5;
+
+      row = qfWriteSection(summarySheet, row, "Visual Analytics", 10, QF_XLSX_COLORS.purple);
+      row = qfWriteChartTable(
+        summarySheet,
+        row,
+        "Queue Status Distribution",
+        reportStatusDistributionData,
+        QF_XLSX_COLORS.blue,
+        reportTotalTickets,
+        qfChartFinding("Queue Status Distribution", reportStatusDistributionData, reportTotalTickets)
+      );
+
+      row = qfWriteChartTable(
+        summarySheet,
+        row,
+        "Office Queue Volume",
+        reportDepartmentSummaryData,
+        QF_XLSX_COLORS.purple,
+        reportTotalTickets,
+        qfChartFinding("Office Queue Volume", reportDepartmentSummaryData, reportTotalTickets)
+      );
+
+      row = qfWriteChartTable(
+        summarySheet,
+        row,
+        "Lane Usage",
+        reportLaneDistributionData,
+        QF_XLSX_COLORS.amber,
+        reportTotalTickets,
+        qfChartFinding("Lane Usage", reportLaneDistributionData, reportTotalTickets)
+      );
+
+      row = qfWriteChartTable(
+        summarySheet,
+        row,
+        "Peak Hour Pattern",
+        reportPeakHourData,
+        QF_XLSX_COLORS.teal,
+        reportTotalTickets,
+        reportPeakInsight
+      );
+
+      row = qfWriteSection(summarySheet, row, "Office Breakdown", 10, QF_XLSX_COLORS.blue);
+      row = qfWriteDataTable(
+        summarySheet,
+        row,
+        "Office-Level Queue Summary",
+        ["Office", "Total", "Active", "Pending", "Serving", "Paused", "Done", "Priority", "Regular", "Completion"],
+        departments
+          .filter((dept) => reportOfficeFilter === "all" || dept.dept_name === reportOfficeFilter)
+          .map((dept) => {
+            const counts = getReportDepartmentCounts(dept.id);
+            return [
+              dept.dept_name || "Office",
+              counts.total,
+              counts.active,
+              counts.pending,
+              counts.serving,
+              counts.paused,
+              counts.done,
+              counts.priority,
+              counts.regular,
+              `${getPercent(counts.done, counts.total)}%`
+            ];
+          }),
+        10
+      );
+
+      row = qfWriteSection(summarySheet, row, "Priority Requests", 10, QF_XLSX_COLORS.amber);
+      row = qfWriteDataTable(
+        summarySheet,
+        row,
+        "Priority Verification Summary",
+        ["Status", "Count", "Meaning"],
+        [
+          ["Pending", pendingPriorityUsers.length, "Waiting for admin verification"],
+          ["Approved", approvedPriorityUsers.length, "Allowed to use priority lane"],
+          ["Rejected", rejectedPriorityUsers.length, "Not allowed for priority lane"]
+        ],
+        10
+      );
+
+      summarySheet["!cols"] = [
+        { wch: 24 },
+        { wch: 12 },
+        { wch: 12 },
+        { wch: 38 },
+        { wch: 48 },
+        { wch: 24 },
+        { wch: 18 },
+        { wch: 18 },
+        { wch: 18 },
+        { wch: 18 }
+      ];
+      summarySheet["!ref"] = `A1:J${row + 3}`;
+      XLSX.utils.book_append_sheet(workbook, summarySheet, "Summary Report");
+
+      const transactionSheet = {};
+      transactionSheet["!merges"] = [];
+      let txRow = qfWriteWorkbookTitle(transactionSheet, "QueueFree Transaction History", "Filtered completed service transactions.", getReportFiltersText(), displayName);
+      txRow = qfWriteDataTable(
+        transactionSheet,
+        txRow,
+        `Transactions (${filteredReportTransactions.length})`,
+        ["Ticket", "Office", "Lane", "Window", "Duration (sec)", "Served By", "End Time"],
+        filteredReportTransactions.map((item) => [
+          item.ticket_number || item.ticket_id || "-",
+          item.dept_name || getDepartmentNameById(item.dept_id),
+          item.lane_type || "Regular",
+          item.window_assignment || "-",
+          Number(item.duration_sec || 0),
+          item.served_by_name || item.served_by || "-",
+          getReadableDateTime(item.end_time)
+        ]),
+        7
+      );
+      transactionSheet["!cols"] = [{ wch: 18 }, { wch: 20 }, { wch: 14 }, { wch: 16 }, { wch: 16 }, { wch: 28 }, { wch: 28 }];
+      transactionSheet["!ref"] = `A1:G${txRow + 3}`;
+      XLSX.utils.book_append_sheet(workbook, transactionSheet, "Transactions");
+
+      const activitySheet = {};
+      activitySheet["!merges"] = [];
+      let actRow = qfWriteWorkbookTitle(activitySheet, "QueueFree User Activity Logs", "Filtered recent user queue actions.", getReportFiltersText(), displayName);
+      actRow = qfWriteDataTable(
+        activitySheet,
+        actRow,
+        `User Activity (${reportUserActivityLogs.length})`,
+        ["User", "Email", "Ticket", "Office", "Status", "Action", "Created"],
+        reportUserActivityLogs.map((log) => [
+          log.userName,
+          log.email,
+          log.ticketNumber,
+          log.department,
+          log.status,
+          log.action,
+          log.createdAt
+        ]),
+        7
+      );
+      activitySheet["!cols"] = [{ wch: 24 }, { wch: 30 }, { wch: 16 }, { wch: 20 }, { wch: 14 }, { wch: 36 }, { wch: 28 }];
+      activitySheet["!ref"] = `A1:G${actRow + 3}`;
+      XLSX.utils.book_append_sheet(workbook, activitySheet, "User Activity");
+
+      const rawRows = getProfessionalCsvRows();
+      const rawSheet = XLSX.utils.json_to_sheet(rawRows);
+      rawSheet["!cols"] = [
+        { wch: 24 },
+        { wch: 24 },
+        { wch: 34 },
+        { wch: 14 },
+        { wch: 14 },
+        { wch: 42 },
+        { wch: 70 },
+        { wch: 26 }
+      ];
+
+      Object.keys(rawRows[0] || {}).forEach((_, colIndex) => {
+        const address = XLSX.utils.encode_cell({ c: colIndex, r: 0 });
+        if (rawSheet[address]) {
+          rawSheet[address].s = qfXlsxStyle({ bold: true, size: 10, color: QF_XLSX_COLORS.title, bg: QF_XLSX_COLORS.header2, align: "center", border: true });
+        }
+      });
+
+      XLSX.utils.book_append_sheet(workbook, rawSheet, "Raw Data");
+      XLSX.writeFile(workbook, `${getReportFileBaseName()}.xlsx`);
+    } catch (error) {
+      console.error("EXPORT SUMMARY EXCEL ERROR:", error);
+      alert("Failed to export Excel report. Please try again.");
+    }
   };
 
   const handleExportSummaryPdf = async () => {
@@ -2785,8 +3295,8 @@ function AdminDashboard() {
                 </button>
 
                 <button type="button" onClick={() => handleExportReport("csv")}>
-                  <strong>Export as CSV</strong>
-                  <span>Spreadsheet-ready report with percentages and progress bars.</span>
+                  <strong>Export Excel Report</strong>
+                  <span>Ready-to-pass workbook with chart-style progress bars, findings, transactions, and activity logs.</span>
                 </button>
               </div>
             )}

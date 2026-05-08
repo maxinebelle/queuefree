@@ -5,7 +5,8 @@ import {
   Route,
   NavLink,
   Navigate,
-  useLocation
+  useLocation,
+  useNavigate
 } from "react-router-dom";
 import { AuthProvider, useAuth } from "./AuthContext";
 import ProtectedRoute from "./ProtectedRoute";
@@ -19,6 +20,7 @@ import AdminDashboard from "./AdminDashboard";
 function AppShellContent() {
   const { currentUser, logout, authLoading } = useAuth();
   const location = useLocation();
+  const navigate = useNavigate();
 
   const isAuthPage =
     location.pathname === "/" ||
@@ -32,6 +34,17 @@ function AppShellContent() {
     if (currentUser.role === "admin") return "/admin";
     if (currentUser.role === "staff") return "/staff";
     return "/user";
+  };
+
+  const handleBrandClick = () => {
+    navigate(currentUser ? getDashboardPath() : "/");
+  };
+
+  const handleBrandKeyDown = (event) => {
+    if (event.key === "Enter" || event.key === " ") {
+      event.preventDefault();
+      handleBrandClick();
+    }
   };
 
   const openDashboardSidebar = () => {
@@ -160,6 +173,19 @@ function AppShellContent() {
       justify-content: center;
       gap: 12px;
       text-align: left;
+      cursor: pointer;
+      border-radius: 18px;
+      padding: 4px 8px;
+      transition: 0.2s ease;
+      outline: none;
+    }
+
+    .qf-shell-brand-center:hover {
+      background: rgba(255,255,255,0.035);
+    }
+
+    .qf-shell-brand-center:focus-visible {
+      box-shadow: 0 0 0 3px rgba(46,168,255,0.24);
     }
 
     .qf-shell-header-row.no-sidebar-button .qf-shell-brand-center {
@@ -333,6 +359,7 @@ function AppShellContent() {
     @media (max-width: 480px) {
       .qf-shell-brand-center {
         gap: 9px;
+        padding: 3px 5px;
       }
 
       .qf-shell-mini {
@@ -385,7 +412,18 @@ function AppShellContent() {
                 </button>
               )}
 
-              <div className="qf-shell-brand-center">
+              <div
+                className="qf-shell-brand-center"
+                onClick={handleBrandClick}
+                onKeyDown={handleBrandKeyDown}
+                role="button"
+                tabIndex={0}
+                title={
+                  currentUser
+                    ? "Go to your QueueFree dashboard"
+                    : "Go to QueueFree landing page"
+                }
+              >
                 <img
                   src="/queuefree-logo.png"
                   alt="QueueFree Logo"
