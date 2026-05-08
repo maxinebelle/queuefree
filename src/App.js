@@ -9,6 +9,7 @@ import {
 } from "react-router-dom";
 import { AuthProvider, useAuth } from "./AuthContext";
 import ProtectedRoute from "./ProtectedRoute";
+import AuthLanding from "./AuthLanding";
 import Login from "./Login";
 import Signup from "./Signup";
 import UserDashboard from "./UserDashboard";
@@ -19,11 +20,15 @@ function AppShellContent() {
   const { currentUser, logout, authLoading } = useAuth();
   const location = useLocation();
 
-  const isAuthPage = location.pathname === "/login" || location.pathname === "/signup";
+  const isAuthPage =
+    location.pathname === "/" ||
+    location.pathname === "/login" ||
+    location.pathname === "/signup";
+
   const shouldShowSidebarButton = currentUser && !isAuthPage;
 
   const getDashboardPath = () => {
-    if (!currentUser) return "/login";
+    if (!currentUser) return "/";
     if (currentUser.role === "admin") return "/admin";
     if (currentUser.role === "staff") return "/staff";
     return "/user";
@@ -449,7 +454,13 @@ function AppShellContent() {
           <Routes>
             <Route
               path="/"
-              element={<Navigate to={getDashboardPath()} replace />}
+              element={
+                currentUser ? (
+                  <Navigate to={getDashboardPath()} replace />
+                ) : (
+                  <AuthLanding />
+                )
+              }
             />
 
             <Route
