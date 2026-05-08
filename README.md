@@ -1,82 +1,128 @@
 # QueueFree
 
-QueueFree is a campus queue management system designed to reduce long physical waiting lines in school offices. It allows users to generate queue tickets, monitor their queue status in real time, and receive updates when their turn is near.
+QueueFree is a campus queue management system that helps reduce long physical waiting lines in school offices. It allows users to generate digital queue tickets, track their queue status in real time, and receive updates when their turn is near.
 
-## Description
+## Live Deployment
 
-QueueFree helps students, staff, and office clients wait more conveniently by allowing them to track queues digitally. Instead of staying physically in line for a long time, users can view their active queue number, estimated waiting time, assigned office, assigned window, and current serving status through the system.
+Live URL:
 
-The system also provides staff and admin dashboards for managing queue flow, calling the next ticket, handling priority users, monitoring office activity, and generating reports.
+```text
+https://queuefree-six.vercel.app
+```
 
-## Features
+GitHub Repository:
 
-- User account registration and login
-- Role-based access for user, staff, and admin
+```text
+https://github.com/maxinebelle/queuefree
+```
+
+## Main Features
+
+- User, staff, and admin login
 - Digital queue ticket generation
 - Regular and priority lane support
-- Real-time queue status updates
+- Real-time queue status tracking
 - Assigned office and assigned window display
-- Staff dashboard for calling, pausing, resuming, and finishing tickets
-- Admin dashboard for managing users, staff, offices, and queue records
-- Queue reset and queue numbering management
-- Summary reports and transaction history
-- User activity logs
-- CSV export for reports
-- AI-assisted predictive analytics for estimated waiting time
+- Queue position and estimated waiting time
+- User notifications and queue history
+- Staff queue control: call, pause, resume, and finish tickets
+- Admin management for users, staff, offices, tickets, and transactions
+- Summary reports, analytics, user activity logs, and transaction history
+- PDF and Excel report export
+- AI-assisted estimated waiting time
 
 ## Technologies Used
 
--React.js
--Firebase Authentication
--Cloud Firestore
--Firebase Security Rules
--JavaScript
--CSS
--jsPDF
--xlsx-js-style
--Git
--GitHub
-
-## Firebase Setup
-
-QueueFree uses Firebase for authentication and database storage.
-
-Firebase services used:
-
-- Firebase Authentication for login and signup
-- Cloud Firestore for storing users, queue tickets, departments, staff windows, transactions, reports, and prediction data
-- Firebase Security Rules for role-based database access
-
-Main Firestore collections:
-
-- users
-- departments
-- queue_tickets
-- transactions
-- staff_windows
-- office_prediction_stats
-- user_activity_logs
-- reports
+- React.js
+- Firebase Authentication
+- Cloud Firestore
+- Firebase Security Rules
+- JavaScript
+- CSS
+- jsPDF
+- xlsx-js-style
+- Git and GitHub
+- Vercel
 
 ## User Roles
 
 ### User
-
-Users can create an account, generate queue tickets, view their active queue, check their estimated waiting time, and receive queue status updates.
+Users can create an account, generate queue tickets, monitor their queue status, view estimated waiting time, and receive queue updates.
 
 ### Staff
-
-Staff members can manage the queue for their assigned office and assigned window. They can call the next ticket, pause a current ticket, resume paused tickets, and finish served tickets.
+Staff can manage queues for their assigned office and window by calling, pausing, resuming, and finishing tickets.
 
 ### Admin
+Admins can manage users, staff, offices, queue records, priority requests, reports, analytics, and system activity logs.
 
-Admins can manage users, staff, offices, queue records, reports, analytics, and system activity logs.
+## Installation
 
-## Installation Steps
-
-Follow these steps to run the project locally.
-
-### 1. Clone the repository
+Clone the repository:
 
 ```bash
 git clone https://github.com/maxinebelle/queuefree.git
+```
+
+Open the project folder:
+
+```bash
+cd queuefree
+```
+
+Install dependencies:
+
+```bash
+npm install
+```
+
+Run the system locally:
+
+```bash
+npm start
+```
+
+Local URL:
+
+```text
+http://localhost:3000
+```
+
+## Build
+
+To check the production build:
+
+```bash
+npm run build
+```
+
+## Member Pull Instructions
+
+After pulling the latest update:
+
+```bash
+git pull origin master
+npm install
+npm start
+```
+
+If there is a missing module error for reports:
+
+```bash
+npm install jspdf xlsx-js-style
+npm start
+```
+
+## Deployment
+
+QueueFree is deployed using Vercel. Future updates can be applied by pushing changes to the `master` branch.
+
+```text
+Edit code → Commit changes → Push to GitHub → Vercel redeploys automatically
+```
+
+## Team Members
+
+- Lariba, Marie Belle
+- Amahan, Glyka Marie
+- Seno, Ma. Jodelyn
+- Dusaran, Celine Kaye
