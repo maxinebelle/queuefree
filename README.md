@@ -26,14 +26,16 @@ The system also provides staff and admin dashboards for managing queue flow, cal
 
 ## Technologies Used
 
-- React.js
-- Firebase Authentication
-- Cloud Firestore
-- Firebase Security Rules
-- JavaScript
-- CSS
-- Git
-- GitHub
+-React.js
+-Firebase Authentication
+-Cloud Firestore
+-Firebase Security Rules
+-JavaScript
+-CSS
+-jsPDF
+-xlsx-js-style
+-Git
+-GitHub
 
 ## Firebase Setup
 
