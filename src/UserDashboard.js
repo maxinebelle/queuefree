@@ -3,7 +3,6 @@ import { db } from "./firebase";
 import { useAuth } from "./AuthContext";
 import {
   collection,
-  deleteDoc,
   doc,
   getDocs,
   onSnapshot,
@@ -985,6 +984,16 @@ function UserDashboard() {
         return;
       }
 
+      if (ticket.status === "Cancelled") {
+        alert("This ticket is already cancelled.");
+        return;
+      }
+
+      if (ticket.status === "Reset") {
+        alert("This ticket was already cleared by reset.");
+        return;
+      }
+
       const confirmCancel = window.confirm(
         `Are you sure you want to cancel ${ticket.ticket_number} for ${ticket.deptName}?`
       );
@@ -993,11 +1002,23 @@ function UserDashboard() {
 
       setCancelLoadingId(ticket.id);
 
-      await deleteDoc(doc(db, "queue_tickets", ticket.id));
+      await updateDoc(doc(db, "queue_tickets", ticket.id), {
+        status: "Cancelled",
+        cancelled_at: serverTimestamp(),
+        completed_at: serverTimestamp(),
+        updated_at: serverTimestamp()
+      });
 
       alert(`Queue ticket ${ticket.ticket_number} was cancelled successfully.`);
+      setActiveSection("history");
     } catch (error) {
       console.error("CANCEL QUEUE ERROR:", error);
+
+      if (error.code === "permission-denied") {
+        alert("Cancel failed because Firestore rules blocked the request.");
+        return;
+      }
+
       alert(error.message || "Failed to cancel queue ticket.");
     } finally {
       setCancelLoadingId("");
@@ -2141,7 +2162,9 @@ function UserDashboard() {
                           disabled={
                             cancelLoadingId === ticket.id ||
                             ticket.status === "Serving" ||
-                            ticket.status === "Done"
+                            ticket.status === "Done" ||
+                            ticket.status === "Cancelled" ||
+                            ticket.status === "Reset"
                           }
                         >
                           {cancelLoadingId === ticket.id ? "Cancelling..." : "Cancel Queue"}
